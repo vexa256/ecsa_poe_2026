@@ -1,0 +1,7 @@
+{
+  "name": "ecsa_poe_2026",
+  "integrations": {
+    "capacitor": {}
+  },
+  "type": "vue-vite"
+}
