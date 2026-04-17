@@ -750,7 +750,7 @@
           </div>
 
           <!-- No analysis yet -->
-          <div v-else-if="!analysisResult" class="sc-empty-analysis" role="status">
+          <div v-if="!analysisResult" class="sc-empty-analysis" role="status">
             <svg viewBox="0 0 20 20" fill="none" stroke="#B0BEC5" stroke-width="1.4" stroke-linecap="round"><circle cx="10" cy="10" r="8"/><path d="M6 10h8M10 6v8"/></svg>
             <span>Analysis not yet run. Go back to step 3 and tap "Analyse →"</span>
           </div>
@@ -2989,8 +2989,10 @@ async function _doInitPage(source) {
       }
       const savedExposures   = await dbGetByIndex(STORE.SECONDARY_EXPOSURES,           'secondary_screening_id', sid)
       for (const se of savedExposures) {
-        const found = exposures.find(e => e.db_code === se.exposure_code)
-        if (found) found.response = se.response
+        if (exposuresMap[se.exposure_code]) {
+          exposuresMap[se.exposure_code].response = se.response
+          exposuresMap[se.exposure_code].details  = se.details
+        }
       }
       actions.value           = await dbGetByIndex(STORE.SECONDARY_ACTIONS,            'secondary_screening_id', sid) || []
       suspectedDiseases.value = await dbGetByIndex(STORE.SECONDARY_SUSPECTED_DISEASES, 'secondary_screening_id', sid) || []
