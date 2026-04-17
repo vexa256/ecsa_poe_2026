@@ -1,4 +1,5 @@
 /* eslint-disable no-dupe-keys */
+/* eslint-disable no-dupe-else-if */
 /* eslint-disable @typescript-eslint/no-unused-vars */
 /**
  * ============================================================
@@ -1402,7 +1403,6 @@
       if (s < 90) { alerts.spo2 = { level: 'CRITICAL', msg: 'SpO\u2082 ' + s + '% — CRITICAL HYPOXIA. WHO emergency threshold is SpO\u2082 <90%. Supplemental oxygen immediately. EMERGENCY referral.' }; critical.push('CRITICAL_HYPOXIA'); needsEmergency = true; }
       else if (s < 94) { alerts.spo2 = { level: 'HIGH', msg: 'SpO\u2082 ' + s + '% — low. WHO supplemental oxygen recommended. Urgent reassessment.' }; warnings.push('Hypoxia SpO2 <94%'); }
       else if (s < 96) { alerts.spo2 = { level: 'MILD', msg: 'SpO\u2082 ' + s + '% — borderline. Monitor closely.' }; }
-      // eslint-disable-next-line no-dupe-else-if
       else if (s < 96) { alerts.spo2 = { level: 'MILD', msg: 'SpO2 94–95% — borderline. Monitor closely.' }; }
     }
 
@@ -2594,7 +2594,6 @@
         'RW': 'Rwanda', 'ZM': 'Zambia', 'GH': 'Ghana', 'CI': 'Côte d\'Ivoire', 'CM': 'Cameroon',
         'AO': 'Angola', 'MZ': 'Mozambique', 'ZW': 'Zimbabwe', 'MW': 'Malawi', 'BD': 'Bangladesh',
         'IN': 'India', 'PK': 'Pakistan', 'AF': 'Afghanistan', 'SA': 'Saudi Arabia',
-        // eslint-disable-next-line no-dupe-keys
         'AE': 'United Arab Emirates', 'HT': 'Haiti', 'IN': 'India', 'PH': 'Philippines',
         'ID': 'Indonesia', 'VN': 'Vietnam', 'TH': 'Thailand', 'MM': 'Myanmar', 'KH': 'Cambodia',
         'NP': 'Nepal', 'LK': 'Sri Lanka', 'SD': 'Sudan', 'YE': 'Yemen', 'SO': 'Somalia',
@@ -3072,7 +3071,6 @@
       paras.push('The engine scored all ' + D.diseases.length + ' diseases in the database simultaneously. Below is the complete differential analysis of the top candidates, explaining why each disease ranked as it did relative to the primary signal. This is the same reasoning process a clinical specialist would apply, now made fully transparent.');
 
       topDiagnoses.slice(0, 5).forEach((d, idx) => {
-        // eslint-disable-next-line @typescript-eslint/no-unused-vars
         const dis = D.diseases.find(x => x.id === d.disease_id);
         bullets.push('\n  RANK ' + (idx + 1) + ': ' + d.name + ' — Score ' + d.final_score + '/100 (' + (d.confidence_band || 'low').toUpperCase() + ')');
         bullets.push('    IHR Classification: ' + tierDescription(d.priority_tier));

@@ -4,7 +4,27 @@ import HomePage from '../views/HomePage.vue'
 import PrimaryScreening from '../views/PrimaryScreening.vue'
 import POEs from '../views/POEs.vue'
 
+/**
+ * ╔══════════════════════════════════════════════════════════════════════╗
+ * ║  POE Sentinel Router — index.js                                      ║
+ * ╠══════════════════════════════════════════════════════════════════════╣
+ * ║  ORDERING LAW — NEVER VIOLATE:                                       ║
+ * ║                                                                      ║
+ * ║  SPECIFIC paths must be declared BEFORE wildcard /:param paths in    ║
+ * ║  the same segment. Vue Router matches top-to-bottom.                 ║
+ * ║                                                                      ║
+ * ║  /secondary-screening/records   ← MUST come before                  ║
+ * ║  /secondary-screening/:notificationId  ← wildcard catches "records"  ║
+ * ║                                                                      ║
+ * ║  Same applies to /primary-screening/dashboard and /records.          ║
+ * ║                                                                      ║
+ * ║  LAW 1: Navigate with server integer id ONLY — never client_uuid.    ║
+ * ╚══════════════════════════════════════════════════════════════════════╝
+ */
+
 const routes = [
+
+  // ── Root redirects ─────────────────────────────────────────────────────────
   {
     path: '/',
     redirect: '/home',
@@ -13,7 +33,61 @@ const routes = [
     path: '/dashboard',
     redirect: '/home',
   },
-  // ── Active Alerts (supervisors — DISTRICT / PHEOC / NATIONAL) ─────────────
+
+  // ── Home Dashboard ─────────────────────────────────────────────────────────
+  {
+    path: '/home',
+    name: 'Home',
+    component: HomePage,
+  },
+
+  // ── Primary Screening (capture screen) ────────────────────────────────────
+  {
+    path: '/PrimaryScreening',
+    name: 'PrimaryScreening',
+    component: PrimaryScreening,
+  },
+
+  // ── Primary Screening Dashboard (analytics) ────────────────────────────────
+  // ⚑ Specific paths declared BEFORE any wildcard in the same segment
+  {
+    path: '/primary-screening/dashboard',
+    name: 'PrimaryScreeningDashboard',
+    component: () => import('@/views/PrimaryScreeningDashboard.vue'),
+  },
+
+  // ── Primary Screening Records (officer case register) ──────────────────────
+  {
+    path: '/primary-screening/records',
+    name: 'PrimaryScreeningRecords',
+    component: () => import('@/views/PrimaryScreeningRecords.vue'),
+  },
+
+  // ── Notifications Centre (referral queue for secondary officers) ───────────
+  {
+    path: '/NotificationsCenter',
+    name: 'NotificationsCenter',
+    component: () => import('@/views/NotificationsCenter.vue'),
+  },
+
+  // ── Secondary Screening Records ────────────────────────────────────────────
+  // ⚑ MUST be declared BEFORE /secondary-screening/:notificationId
+  //   Vue Router reads top-to-bottom — the string "records" matches the
+  //   :notificationId wildcard if the wildcard comes first → blank page.
+  {
+    path: '/secondary-screening/records',
+    name: 'SecondaryRecords',
+    component: () => import('@/views/SecondaryRecords.vue'),
+  },
+
+  // ── Secondary Screening case view (opened from NotificationsCenter) ─────────
+  {
+    path: '/secondary-screening/:notificationId',
+    name: 'SecondaryScreening',
+    component: () => import('@/views/SecondaryScreening.vue'),
+  },
+
+  // ── Active Alerts (DISTRICT_SUPERVISOR / PHEOC_OFFICER / NATIONAL_ADMIN) ───
   {
     path: '/alerts',
     name: 'ActiveAlerts',
@@ -27,40 +101,14 @@ const routes = [
     component: () => import('@/views/AggregatedData.vue'),
   },
 
-  // ── Sync Management (IDB-only — offline queue status + manual push) ────────
+  // ── Sync Management (offline queue status + manual push) ──────────────────
   {
     path: '/sync',
     name: 'SyncManagement',
     component: () => import('@/views/SyncManagement.vue'),
   },
 
-  // ── Core Dashboard ─────────────────────────────────────────────────────────
-  {
-    path: '/home',
-    name: 'Home',
-    component: HomePage,
-  },
-
-  // ── Primary Screening ──────────────────────────────────────────────────────
-  {
-    path: '/PrimaryScreening',
-    name: 'PrimaryScreening',
-    component: PrimaryScreening,
-  },
-
-  { path: '/NotificationsCenter', component: () => import('@/views/NotificationsCenter.vue') },
-
-
-  // ── Secondary Screening ────────────────────────────────────────────────────
-  // {
-  //   path: '/SecondaryScreening/:notifId',
-  //   name: 'SecondaryScreening',
-  //   component: () => import('../views/SecondaryScreening.vue'),
-  //   props: true,
-  // },
-
-
-  // ── POEs ───────────────────────────────────────────────────────────────────
+  // ── POE Management ─────────────────────────────────────────────────────────
   {
     path: '/POEs',
     name: 'POEs',
@@ -74,28 +122,25 @@ const routes = [
     component: () => import('../views/UsersList.vue'),
   },
 
+  // ── My Profile ─────────────────────────────────────────────────────────────
   {
-    path: '/secondary-screening/records',
-    name: 'SecondaryRecords',
-    component: () => import('@/views/SecondaryRecords.vue'),
-  },
-  {
-    path: '/primary-screening/dashboard',
-    name: 'PrimaryScreeningDashboard',
-    component: () => import('@/views/PrimaryScreeningDashboard.vue'),
-  },
-  {
-    path: '/primary-screening/records',
-    name: 'PrimaryScreeningRecords',
-    component: () => import('@/views/PrimaryScreeningRecords.vue'),
+    path: '/profile',
+    name: 'MyProfile',
+    component: () => import('@/views/MyProfile.vue'),
   },
 
+  // ── App Settings ───────────────────────────────────────────────────────────
   {
-    path: '/secondary-screening/:notificationId',
-    name: 'SecondaryScreening',
-    component: () => import('@/views/SecondaryScreening.vue'),
+    path: '/settings',
+    name: 'AppSettings',
+    component: () => import('@/views/AppSettings.vue'),
   },
 
+  // ── 404 fallback ───────────────────────────────────────────────────────────
+  {
+    path: '/:pathMatch(.*)*',
+    redirect: '/home',
+  },
 
 ]
 
