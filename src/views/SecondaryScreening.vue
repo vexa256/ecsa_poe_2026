@@ -41,6 +41,9 @@
             · {{ auth.poe_code ?? '—' }}
           </div>
         </div>
+        <div v-if="primaryScreening?.traveler_direction" class="sc-dir-badge" :class="'sc-dir--'+(primaryScreening.traveler_direction||'').toLowerCase()">
+          {{ primaryScreening.traveler_direction }}
+        </div>
         <div class="sc-prio-pill" :class="priorityClass">{{ notification.priority || 'NORMAL' }}</div>
       </div>
 
@@ -556,46 +559,50 @@
             <strong>Unknown</strong> is the default — only change to Yes or No when certain.
           </div>
 
-          <div class="sc-exposure-list">
-            <div
-              v-for="(exp, idx) in exposures"
-              :key="exp.db_code"
-              class="sc-exp-card"
-            >
-              <div class="sc-exp-num" aria-hidden="true">{{ idx + 1 }}</div>
+          <!-- HIGH-RISK signal banner -->
+          <div v-if="highRiskSignals.length > 0" class="sc-exp-hisig" role="alert" aria-live="polite">
+            <svg viewBox="0 0 14 14" fill="none" stroke="#fff" stroke-width="1.6" stroke-linecap="round"><path d="M7 1L1 12h12L7 1z"/><line x1="7" y1="5" x2="7" y2="8.5"/><circle cx="7" cy="10.5" r=".6" fill="#fff"/></svg>
+            <div>
+              <div class="sc-exp-hisig-title">{{ highRiskSignals.length }} HIGH-RISK Exposure{{ highRiskSignals.length > 1 ? 's' : '' }} Confirmed</div>
+              <div v-for="sig in highRiskSignals" :key="sig.code" class="sc-exp-hisig-row">
+                <span class="sc-exp-hisig-lbl">{{ sig.label }}</span>
+                <span v-if="sig.critical_message" class="sc-exp-hisig-note">{{ sig.critical_message }}</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Exposures grouped by category from window.EXPOSURES -->
+          <div v-for="cat in exposureCategoryKeys" :key="cat" class="sc-exp-cat">
+            <div class="sc-exp-cat-hdr">{{ EXPOSURE_CATEGORY_LABELS[cat] || cat }}</div>
+            <div v-for="exp in exposuresByCategory[cat]" :key="exp.code" class="sc-exp-card"
+              :class="{ 'sc-exp-card--yes': exposuresMap[exp.code]?.response === 'YES', 'sc-exp-card--high': exp.risk_level === 'VERY_HIGH' || exp.risk_level === 'HIGH' }">
               <div class="sc-exp-body">
-                <p class="sc-exp-question">{{ exp.question }}</p>
-                <div class="sc-exp-btns" role="group" :aria-label="'Answer for: ' + exp.question">
-                  <button
-                    class="sc-exp-btn sc-exp-btn--yes"
-                    :class="{ 'sc-exp-btn--active': exp.response === 'YES' }"
-                    type="button"
-                    @click="exp.response = exp.response === 'YES' ? 'UNKNOWN' : 'YES'"
-                    :aria-pressed="exp.response === 'YES'"
-                  >Yes</button>
-                  <button
-                    class="sc-exp-btn sc-exp-btn--no"
-                    :class="{ 'sc-exp-btn--active': exp.response === 'NO' }"
-                    type="button"
-                    @click="exp.response = exp.response === 'NO' ? 'UNKNOWN' : 'NO'"
-                    :aria-pressed="exp.response === 'NO'"
-                  >No</button>
-                  <button
-                    class="sc-exp-btn sc-exp-btn--unk"
-                    :class="{ 'sc-exp-btn--active': exp.response === 'UNKNOWN' }"
-                    type="button"
-                    @click="exp.response = 'UNKNOWN'"
-                    :aria-pressed="exp.response === 'UNKNOWN'"
-                  >Unknown</button>
+                <div class="sc-exp-header-row">
+                  <p class="sc-exp-question">{{ exp.label }}</p>
+                  <span v-if="exp.risk_level === 'VERY_HIGH'" class="sc-exp-risk sc-exp-risk--vhigh">VERY HIGH RISK</span>
+                  <span v-else-if="exp.risk_level === 'HIGH'" class="sc-exp-risk sc-exp-risk--high">HIGH RISK</span>
+                </div>
+                <p class="sc-exp-desc">{{ exp.description }}</p>
+                <div class="sc-exp-btns" role="group" :aria-label="'Answer for: ' + exp.label">
+                  <button class="sc-exp-btn sc-exp-btn--yes" :class="{ 'sc-exp-btn--active': exposuresMap[exp.code]?.response === 'YES' }"
+                    type="button" @click="setExposureResponse(exp.code, 'YES')" :aria-pressed="exposuresMap[exp.code]?.response === 'YES'">Yes</button>
+                  <button class="sc-exp-btn sc-exp-btn--no"  :class="{ 'sc-exp-btn--active': exposuresMap[exp.code]?.response === 'NO' }"
+                    type="button" @click="setExposureResponse(exp.code, 'NO')"  :aria-pressed="exposuresMap[exp.code]?.response === 'NO'">No</button>
+                  <button class="sc-exp-btn sc-exp-btn--unk" :class="{ 'sc-exp-btn--active': !exposuresMap[exp.code] || exposuresMap[exp.code]?.response === 'UNKNOWN' }"
+                    type="button" @click="setExposureResponse(exp.code, 'UNKNOWN')">Unknown</button>
+                </div>
+                <!-- Critical flag warning when YES -->
+                <div v-if="exp.critical_flag && exposuresMap[exp.code]?.response === 'YES'" class="sc-exp-critical" role="alert">
+                  ⚠ {{ exp.critical_message }}
                 </div>
               </div>
             </div>
           </div>
 
-          <!-- Summary of YES responses -->
+          <!-- Summary -->
           <div v-if="yesExposureCount > 0" class="sc-exp-summary" role="status" aria-live="polite">
             <svg viewBox="0 0 14 14" fill="none" stroke="#E65100" stroke-width="1.5" stroke-linecap="round"><path d="M7 1L1 12h12L7 1z"/><line x1="7" y1="5.5" x2="7" y2="8.5"/><circle cx="7" cy="10.5" r=".6" fill="#E65100"/></svg>
-            <span><strong>{{ yesExposureCount }}</strong> risk exposure{{ yesExposureCount > 1 ? 's' : '' }} confirmed — will be factored into analysis</span>
+            <span><strong>{{ yesExposureCount }}</strong> exposure{{ yesExposureCount > 1 ? 's' : '' }} confirmed YES — {{ engineExposureCodes.length }} engine signals activated</span>
           </div>
 
           <div style="height:8px"/>
@@ -633,30 +640,112 @@
             <span class="sc-flag-txt">{{ FLAG_MESSAGES[flag] || flag }}</span>
           </div>
 
-          <!-- Top disease cards -->
-          <div v-if="analysisResult && analysisResult.top_diagnoses.length > 0" class="sc-disease-list">
-            <div
-              v-for="(d, idx) in analysisResult.top_diagnoses.slice(0, 5)"
-              :key="d.disease_id"
-              class="sc-disease-card"
-              :class="'sc-disease-card--' + (d.confidence_band || 'low')"
-            >
-              <div class="sc-dc-rank" :class="idx === 0 ? 'sc-dc-rank--top' : ''" aria-label="Rank">{{ idx + 1 }}</div>
+          <!-- NON-CASE VERDICT BANNER -->
+          <div v-if="analysisResult?.is_non_case" class="sc-noncase-banner" role="alert">
+            <div class="sc-nc-hdr">
+              <svg viewBox="0 0 16 16" fill="none" stroke="#00C853" stroke-width="1.8" stroke-linecap="round"><circle cx="8" cy="8" r="6"/><polyline points="5 8 7 10 11 6"/></svg>
+              <span>NON-CASE — No Clinical Indicators</span>
+            </div>
+            <div v-for="reason in analysisResult.non_case.reasons" :key="reason" class="sc-nc-reason">{{ reason }}</div>
+            <div class="sc-nc-action">Recommended: Syndrome = NONE · Disposition = RELEASED</div>
+            <button class="sc-nc-override-btn" type="button" @click="officerOverride.overrideNonCase = !officerOverride.overrideNonCase">
+              {{ officerOverride.overrideNonCase ? '✓ Override Active' : 'Officer Override — I disagree' }}
+            </button>
+            <div v-if="officerOverride.overrideNonCase" class="sc-nc-override-note">
+              <span class="sc-nc-override-lbl">Mandatory: Document clinical justification for overriding the non-case classification:</span>
+              <textarea class="sc-override-input" rows="2" v-model="officerOverride.overrideNote" placeholder="e.g. Traveller has rash not captured in symptom list. Clinical assessment suggests infectious illness…" />
+            </div>
+          </div>
+
+          <!-- OUTBREAK CONTEXT — countries that triggered endemic bonuses -->
+          <div v-if="(analysisResult?.outbreak_context_used?.length || 0) > 0 && !analysisResult?.is_non_case" class="sc-outbreak-ctx">
+            <div class="sc-oc-hdr">
+              <svg viewBox="0 0 14 14" fill="none" stroke="#FF6D00" stroke-width="1.5" stroke-linecap="round"><circle cx="7" cy="7" r="5"/><line x1="7" y1="4" x2="7" y2="7.5"/><circle cx="7" cy="9.5" r=".5" fill="#FF6D00"/></svg>
+              <span>Travel History Matches {{ analysisResult.outbreak_context_used.length }} Endemic Disease Zone{{ analysisResult.outbreak_context_used.length > 1 ? 's' : '' }}</span>
+            </div>
+            <div class="sc-oc-chips">
+              <span v-for="diseaseId in analysisResult.outbreak_context_used.slice(0,8)" :key="diseaseId" class="sc-oc-chip">{{ diseaseId.replace(/_/g,' ') }}</span>
+              <span v-if="analysisResult.outbreak_context_used.length > 8" class="sc-oc-chip sc-oc-chip--more">+{{ analysisResult.outbreak_context_used.length - 8 }} more</span>
+            </div>
+          </div>
+
+          <!-- IHR RISK ASSESSMENT from engine -->
+          <div v-if="analysisResult?.ihr_risk && !analysisResult?.is_non_case" class="sc-ihr-result" :class="'sc-ihr--'+analysisResult.ihr_risk.risk_level.toLowerCase()">
+            <div class="sc-ihr-hdr">
+              <span class="sc-ihr-level">{{ analysisResult.ihr_risk.risk_level }}</span>
+              <span class="sc-ihr-routing" v-if="analysisResult.ihr_risk.routing_level">→ {{ analysisResult.ihr_risk.routing_level }}</span>
+              <span v-if="analysisResult.ihr_risk.ihr_alert_required" class="sc-ihr-alert-badge">IHR NOTIFICATION REQUIRED</span>
+            </div>
+            <div v-for="r in (analysisResult.ihr_risk.reasoning || []).slice(0,3)" :key="r" class="sc-ihr-reason">{{ r }}</div>
+          </div>
+
+          <!-- Top disease cards with WHO case definitions -->
+          <div v-if="analysisResult && analysisResult.top_diagnoses.length > 0 && !analysisResult.is_non_case" class="sc-disease-list">
+            <div v-for="(d, idx) in analysisResult.top_diagnoses.slice(0, 5)" :key="d.disease_id"
+              class="sc-disease-card" :class="'sc-disease-card--' + (d.confidence_band || 'low')">
+              <div class="sc-dc-rank" :class="idx === 0 ? 'sc-dc-rank--top' : ''">{{ idx + 1 }}</div>
               <div class="sc-dc-body">
-                <div class="sc-dc-name">{{ d.name }}</div>
+                <div class="sc-dc-name-row">
+                  <span class="sc-dc-name">{{ d.name }}</span>
+                  <span v-if="d.syndrome_matched" class="sc-dc-syn-match">{{ d.syndrome_matched }} ✓</span>
+                </div>
                 <div class="sc-dc-meta">
-                  <span class="sc-dc-score">Score: {{ d.final_score }}</span>
+                  <span class="sc-dc-score">{{ d.final_score }}pts</span>
                   <span class="sc-dc-band" :class="'sc-dc-band--' + (d.confidence_band || 'low')">{{ d.confidence_band }}</span>
                   <span v-if="d.ihr_category" class="sc-dc-ihr">{{ d.ihr_category }}</span>
+                  <span v-if="d.cfr_pct" class="sc-dc-cfr">CFR {{ d.cfr_pct }}%</span>
                 </div>
                 <div v-if="d.matched_hallmarks.length > 0" class="sc-dc-hallmarks">
-                  <span class="sc-dc-hlbl">Key: </span>
                   <span v-for="h in d.matched_hallmarks" :key="h" class="sc-dc-htag">{{ h.replace(/_/g,' ') }}</span>
+                </div>
+                <!-- WHO Case Definition (expandable) -->
+                <button class="sc-dc-def-toggle" type="button" @click="expandedDiseaseId = expandedDiseaseId === d.disease_id ? null : d.disease_id">
+                  {{ expandedDiseaseId === d.disease_id ? 'Hide' : 'WHO Case Definition' }} ↕
+                </button>
+                <div v-if="expandedDiseaseId === d.disease_id" class="sc-dc-casedefs">
+                  <div v-if="getDiseaseDefinition(d.disease_id)" class="sc-dc-def-block">
+                    <div class="sc-dc-def-row sc-dc-def--suspected">
+                      <span class="sc-dc-def-k">SUSPECTED</span>
+                      <span class="sc-dc-def-v">{{ getDiseaseDefinition(d.disease_id).suspected }}</span>
+                    </div>
+                    <div v-if="getDiseaseDefinition(d.disease_id).confirmed" class="sc-dc-def-row sc-dc-def--confirmed">
+                      <span class="sc-dc-def-k">CONFIRMED</span>
+                      <span class="sc-dc-def-v">{{ getDiseaseDefinition(d.disease_id).confirmed }}</span>
+                    </div>
+                    <div v-if="getDiseaseDefinition(d.disease_id).ihr_category" class="sc-dc-def-row sc-dc-def--ihr">
+                      <span class="sc-dc-def-k">IHR</span>
+                      <span class="sc-dc-def-v">{{ getDiseaseDefinition(d.disease_id).ihr_category }}</span>
+                    </div>
+                    <div v-if="getDiseaseDefinition(d.disease_id).poe_action" class="sc-dc-def-row sc-dc-def--action">
+                      <span class="sc-dc-def-k">POE ACTION</span>
+                      <span class="sc-dc-def-v">{{ getDiseaseDefinition(d.disease_id).poe_action }}</span>
+                    </div>
+                  </div>
                 </div>
               </div>
               <div class="sc-dc-pct" :class="'sc-dc-pct--' + (d.confidence_band || 'low')">
                 {{ d.probability_like_percent != null ? d.probability_like_percent + '%' : '' }}
               </div>
+            </div>
+          </div>
+
+          <!-- Officer override — Suspected Diseases -->
+          <div class="sc-override-section">
+            <div class="sc-section-hdr" style="margin-top:12px">
+              <span class="sc-sec-num sc-sec-num--purple">O</span>
+              <span class="sc-sec-title">Officer Override — Suspected Disease</span>
+              <span class="sc-sec-badge sc-sec-badge--opt">Optional</span>
+            </div>
+            <p class="sc-override-hint">The algorithm has suggested the diseases above. If you clinically suspect a different disease not in this list, add it here. Your override is recorded and reported to surveillance.</p>
+            <div class="sc-override-add-row">
+              <input v-model="officerOverride.customDiseaseInput" class="sc-override-disease-input" type="text" placeholder="Disease name (free text)…" aria-label="Add suspected disease" />
+              <button class="sc-override-add-btn" type="button" @click="addOfficerSuspectedDisease" :disabled="!officerOverride.customDiseaseInput">Add</button>
+            </div>
+            <div v-if="officerOverride.addedDiseases.length > 0" class="sc-override-added">
+              <span v-for="(d, i) in officerOverride.addedDiseases" :key="i" class="sc-override-tag">
+                {{ d }}
+                <button type="button" class="sc-override-rm" @click="officerOverride.addedDiseases.splice(i,1)">×</button>
+              </span>
             </div>
           </div>
 
@@ -673,6 +762,11 @@
             <span v-if="autoSyndromeApplied && caseDecision.syndrome_classification" class="sc-sec-badge sc-sec-badge--auto">Auto-set ✓</span>
             <span v-else class="sc-sec-badge sc-sec-badge--req">Required</span>
           </div>
+          <!-- Engine syndrome suggestion -->
+          <div v-if="analysisResult?.syndrome" class="sc-syn-engine-hint">
+            <svg viewBox="0 0 12 12" fill="none" stroke="#1565C0" stroke-width="1.6" stroke-linecap="round" style="width:11px;height:11px;flex-shrink:0"><circle cx="6" cy="6" r="4.5"/><line x1="6" y1="4" x2="6" y2="6.5"/><circle cx="6" cy="8.5" r=".5" fill="#1565C0"/></svg>
+            <span>Engine suggests: <strong>{{ analysisResult.syndrome.syndrome }}</strong> ({{ analysisResult.syndrome.confidence }}) — {{ analysisResult.syndrome.reasoning }}</span>
+          </div>
           <div v-if="autoSyndromeApplied" class="sc-auto-hint">
             <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" style="width:10px;height:10px;flex-shrink:0"><circle cx="6" cy="6" r="4.5"/><polyline points="4 6 5.5 7.5 8 4.5"/></svg>
             Syndrome auto-classified from symptoms. Tap another button to override.
@@ -687,7 +781,7 @@
                 'sc-syn-btn--danger': syn.danger,
               }"
               type="button"
-              @click="caseDecision.syndrome_classification = syn.code; autoSyndromeApplied = false"
+              @click="caseDecision.syndrome_classification = syn.code; autoSyndromeApplied = false; officerOverride.syndromeOverridden = true"
               :aria-pressed="caseDecision.syndrome_classification === syn.code"
             >
               <span class="sc-syn-code">{{ syn.code }}</span>
@@ -701,13 +795,19 @@
             <span class="sc-sec-title">Risk Level Assessment</span>
             <span class="sc-sec-badge sc-sec-badge--req">Required</span>
           </div>
+          <div v-if="analysisResult?.ihr_risk && !analysisResult?.is_non_case" class="sc-risk-engine-suggest">
+            <svg viewBox="0 0 12 12" fill="none" stroke="#1565C0" stroke-width="1.6" stroke-linecap="round" style="width:11px;height:11px;flex-shrink:0"><circle cx="6" cy="6" r="4.5"/><line x1="6" y1="4" x2="6" y2="6.5"/><circle cx="6" cy="8.5" r=".5" fill="#1565C0"/></svg>
+            <span>IHR Algorithm suggests: <strong>{{ analysisResult.ihr_risk.risk_level }}</strong> — Route to <strong>{{ analysisResult.ihr_risk.routing_level }}</strong></span>
+            <button v-if="analysisResult.ihr_risk.risk_level !== caseDecision.risk_level" class="sc-risk-apply-btn" type="button"
+              @click="caseDecision.risk_level = analysisResult.ihr_risk.risk_level; officerOverride.riskOverridden = false">Apply</button>
+          </div>
           <div v-if="fieldErrors.risk_level" class="sc-field-err" role="alert">{{ fieldErrors.risk_level }}</div>
           <div class="sc-risk-row">
             <button v-for="rl in RISK_LEVELS" :key="rl.value"
               class="sc-risk-btn"
               :class="['sc-risk-btn--' + rl.value.toLowerCase(), caseDecision.risk_level === rl.value && 'sc-risk-btn--active']"
               type="button"
-              @click="caseDecision.risk_level = rl.value"
+              @click="caseDecision.risk_level = rl.value; officerOverride.riskOverridden = true"
               :aria-pressed="caseDecision.risk_level === rl.value"
             >
               <span class="sc-risk-lbl">{{ rl.label }}</span>
@@ -1118,43 +1218,61 @@ const vitals = reactive({
   syndrome_classification: '',
 })
 
-// ─── STEP 3: EXPOSURES ────────────────────────────────────────────────────
-// Exactly 5 structured exposure questions (DB SOT: secondary_exposures table)
-const exposures = reactive([
-  {
-    db_code:    'SICK_PERSON_CONTACT',
-    engine_code: 'contact_body_fluids',
-    question:  'Exposed to blood or body fluids of a symptomatic person?',
-    response:  'UNKNOWN',
-  },
-  {
-    db_code:    'KNOWN_CASE_CONTACT',
-    engine_code: 'close_contact_case',
-    question:  'Provided direct care to a person with epidemic-prone illness?',
-    response:  'UNKNOWN',
-  },
-  {
-    db_code:    'FUNERAL_BURIAL',
-    engine_code: 'contact_dead_body',
-    question:  'Handled dead bodies of persons with epidemic-prone illness?',
-    response:  'UNKNOWN',
-  },
-  {
-    db_code:    'LAB_EXPOSURE',
-    engine_code: 'healthcare_exposure',
-    question:  'Worked in a laboratory handling infectious materials?',
-    response:  'UNKNOWN',
-  },
-  {
-    db_code:    'MASS_GATHERING',
-    engine_code: 'funeral_or_burial_exposure',
-    question:  'Attended a funeral or burial ceremony in a risk area?',
-    response:  'UNKNOWN',
-  },
-])
+// ─── STEP 3: EXPOSURES ─────────────────────────────────────────────────────
+// Driven by window.EXPOSURES catalog (exposures.js). Each exposure entry has:
+//   exposure_code — the DB code (PK in secondary_exposures.exposure_code)
+//   response      — YES / NO / UNKNOWN
+//   details       — free text from officer
+// window.EXPOSURES.mapToEngineCodes() translates these to engine codes
+// for scoreDiseases(). No mapping logic in this Vue file.
+const exposuresMap = reactive({})  // keyed by exposure_code
+
+function initExposuresFromCatalog() {
+  const catalog = window.EXPOSURES?.getAll() || []
+  for (const exp of catalog) {
+    if (!exposuresMap[exp.code]) {
+      exposuresMap[exp.code] = {
+        exposure_code: exp.code,
+        response:      'UNKNOWN',
+        details:       null,
+      }
+    }
+  }
+  L.info('initExposuresFromCatalog: ' + catalog.length + ' exposures initialized')
+}
+
+function setExposureResponse(code, response) {
+  if (!exposuresMap[code]) {
+    exposuresMap[code] = { exposure_code: code, response: 'UNKNOWN', details: null }
+  }
+  // Toggle: if already active, switch to UNKNOWN
+  exposuresMap[code].response = exposuresMap[code].response === response ? 'UNKNOWN' : response
+}
+
+const allExposures = computed(() => window.EXPOSURES?.getAll() || [])
+const exposuresByCategory = computed(() => window.EXPOSURES?.getCategoryGroups() || {})
+const exposureCategoryKeys = computed(() => Object.keys(exposuresByCategory.value))
+const EXPOSURE_CATEGORY_LABELS = window.EXPOSURES?.CATEGORY_LABELS || {}
+
+const yesExposureCount = computed(() =>
+  Object.values(exposuresMap).filter(e => e.response === 'YES').length
+)
+
+const engineExposureCodes = computed(() => {
+  const records = Object.values(exposuresMap)
+  return window.EXPOSURES?.mapToEngineCodes(records) || []
+})
+
+const highRiskSignals = computed(() => {
+  const records = Object.values(exposuresMap)
+  return window.EXPOSURES?.getHighRiskSignals(records) || []
+})
+
 
 // ─── STEP 4: ANALYSIS & DISPOSITION ──────────────────────────────────────
 const analysisResult   = ref(null)  // result from window.DISEASES.scoreDiseases()
+const clinicalReport  = ref(null) // structured clinical report
+const reportExpanded  = ref(null) // expanded section
 const suspectedDiseases = ref([])   // built from top_diagnoses → secondary_suspected_diseases rows
 
 const caseDecision = reactive({
@@ -1413,6 +1531,34 @@ function _debugTap() {
 // Track whether auto-syndrome was applied this session (for the "Auto" badge in UI)
 const autoSyndromeApplied = ref(false)
 
+// Officer override state — allows officer to disagree with algorithm
+const officerOverride = reactive({
+  syndromeOverridden: false,   // officer manually changed syndrome
+  riskOverridden:     false,   // officer manually changed risk level
+  overrideNonCase:    false,   // officer disagrees with non-case verdict
+  overrideNote:       '',      // mandatory justification text
+  customDiseaseInput: '',      // free-text disease name input
+  addedDiseases:      [],      // officer-added suspected diseases
+})
+
+// Expanded disease definition panel
+const expandedDiseaseId = ref(null)
+
+// Helper to get WHO case definition from intelligence layer
+function getDiseaseDefinition(diseaseId) {
+  return window.DISEASES?.getWHOCaseDefinition?.(diseaseId) || null
+}
+
+// Officer-added disease
+function addOfficerSuspectedDisease() {
+  const name = officerOverride.customDiseaseInput.trim()
+  if (!name) return
+  if (!officerOverride.addedDiseases.includes(name)) {
+    officerOverride.addedDiseases.push(name)
+  }
+  officerOverride.customDiseaseInput = ''
+}
+
 const syncPillClass = computed(() => {
   if (!caseRecord.value) return 'sc-sync-pill--offline'
   return caseRecord.value.sync_status === SYNC.SYNCED ? 'sc-sync-pill--ok' : 'sc-sync-pill--pending'
@@ -1426,9 +1572,6 @@ const presentSymptomCount = computed(() =>
   Object.values(symptomsMap).filter(s => s.is_present === 1).length
 )
 
-const yesExposureCount = computed(() =>
-  exposures.filter(e => e.response === 'YES').length
-)
 
 const criticalFlags = computed(() => {
   if (!analysisResult.value) return []
@@ -1454,6 +1597,19 @@ const alertPreview = computed(() => {
     'ebola_virus_disease','marburg_virus_disease','pneumonic_plague','smallpox',
   ]
 
+  // Use the intelligence layer result when available (FIX — was hardcoded)
+  const ihrRisk = analysisResult.value?.ihr_risk
+  if (ihrRisk?.ihr_alert_required) {
+    const topRule = ihrRisk.triggered_rules?.[0] || null
+    return {
+      alertCode:  topRule || ('CASE_' + rl),
+      routedTo:   ihrRisk.routing_level || 'PHEOC',
+      riskLevel:  rl,
+      ihrTier:    ihrRisk.ihr_tier,
+    }
+  }
+
+  // Fallback: legacy hardcoded alert preview when intelligence result not present
   const topDisease  = suspectedDiseases.value[0]?.disease_code ?? null
   const isPriority1 = PRIORITY1.includes(topDisease)
   const isNational  = NATIONAL_DISEASES.includes(topDisease)
@@ -1800,13 +1956,14 @@ async function saveStep3AndAnalyse() {
 
   saving.value = true
   try {
-    // Build exposure records for secondary_exposures table
-    const exposureRecords = exposures.map(exp => ({
+    // ── Build exposure records from window.EXPOSURES catalog ───────────────
+    // exposuresMap is keyed by exposure code — get all that have a response
+    const exposureRecords = Object.values(exposuresMap).map(exp => ({
       client_uuid:            genUUID(),
       secondary_screening_id: caseUuid.value,
-      exposure_code:          exp.db_code,
-      response:               exp.response,
-      details:                null,
+      exposure_code:          exp.exposure_code,
+      response:               exp.response || 'UNKNOWN',
+      details:                exp.details || null,
       sync_status:            SYNC.UNSYNCED,
     }))
 
@@ -1818,68 +1975,151 @@ async function saveStep3AndAnalyse() {
       toPlain(exposureRecords)
     )
 
-    // ── Run the DISEASES scoring engine ──────────────────────────────────
-    // This is the ONLY place scoreDiseases() is called.
-    const presentSymptoms  = Object.values(symptomsMap).filter(s => s.is_present === 1).map(s => s.symptom_code)
-    const absentSymptoms   = Object.values(symptomsMap).filter(s => s.is_present === 0).map(s => s.symptom_code)
+    // ── INTELLIGENCE LAYER — single call does everything ─────────────────────
+    // FIX: uses window.DISEASES.getEnhancedScoreResult() which:
+    //   1. Builds outbreak_context from travel countries (endemic oracle)
+    //   2. Derives WHO syndrome from symptoms
+    //   3. Runs scoreDiseases() with syndrome_bonus active
+    //   4. Computes IHR risk level per Annex 2
+    //   5. Evaluates non-case verdict
+    //   6. Validates clinical data
+    // No clinical logic in this Vue file.
+    const presentSymptoms = Object.values(symptomsMap).filter(s => s.is_present === 1).map(s => s.symptom_code)
+    const absentSymptoms  = Object.values(symptomsMap).filter(s => s.is_present === 0).map(s => s.symptom_code)
 
-    // Map DB exposure codes → engine exposure IDs (only YES responses)
-    const engineExposures = []
-    for (const exp of exposures) {
-      if (exp.response === 'YES') engineExposures.push(exp.engine_code)
+    // Translate DB exposure codes → engine codes via exposures.js
+    const engineExposureCodes = window.EXPOSURES?.mapToEngineCodes(exposureRecords) || []
+
+    // Vitals for engine (convert F→C)
+    const tc = vitals.temperature_value
+      ? (vitals.temperature_unit === 'F' ? (vitals.temperature_value - 32) * 5 / 9 : vitals.temperature_value)
+      : null
+    const vitalsForEng = {
+      temperature_c:     tc,
+      oxygen_saturation: vitals.oxygen_saturation || undefined,
+      pulse_rate:        vitals.pulse_rate         || undefined,
+      respiratory_rate:  vitals.respiratory_rate   || undefined,
+      bp_systolic:       vitals.bp_systolic         || undefined,
     }
-    // De-duplicate
-    const uniqueEngineExposures = [...new Set(engineExposures)]
 
-    const clinCtx = {}
-    if (vitals.temperature_value != null) {
-      clinCtx.temperature_c = vitals.temperature_unit === 'F'
-        ? (vitals.temperature_value - 32) * 5 / 9
-        : vitals.temperature_value
-    }
-
-    let result = null
+    let enhanced = null
     try {
-      if (window.DISEASES && typeof window.DISEASES.scoreDiseases === 'function') {
-        result = window.DISEASES.scoreDiseases(
+      if (window.DISEASES?.getEnhancedScoreResult) {
+        enhanced = window.DISEASES.getEnhancedScoreResult(
           presentSymptoms,
           absentSymptoms,
-          uniqueEngineExposures,
-          { clinical_context: clinCtx }
+          engineExposureCodes,
+          travelCountries.value.map(tc => ({ country_code: tc.country_code, travel_role: tc.travel_role || 'VISITED' })),
+          vitalsForEng
         )
+        L.ok('getEnhancedScoreResult OK', {
+          syndrome: enhanced.syndrome.syndrome,
+          is_non_case: enhanced.is_non_case,
+          risk: enhanced.ihr_risk.risk_level,
+          top_disease: enhanced.top_disease_id,
+          outbreak_context: enhanced.outbreak_context_used.length,
+        })
+      } else {
+        // Fallback if intelligence layer not loaded
+        const fallback = window.DISEASES?.scoreDiseases?.(presentSymptoms, absentSymptoms, engineExposureCodes, {}) || { top_diagnoses: [], all_reportable: [], global_flags: [], overrides_fired: [], input_summary: {} }
+        enhanced = {
+          ...fallback,
+          syndrome: { syndrome: 'OTHER', confidence: 'LOW', reasoning: 'Intelligence layer not loaded', who_criteria_met: [] },
+          ihr_risk: { risk_level: 'MEDIUM', routing_level: 'DISTRICT', ihr_alert_required: false, ihr_tier: null, triggered_rules: [], reasoning: ['Fallback mode'] },
+          non_case: { isNonCase: false, reasons: [], recommended_syndrome: null, recommended_disposition: null },
+          clinical_validation: { vital_alerts: {}, critical_flags: [], clinical_warnings: [], needs_emergency_triage: false },
+          outbreak_context_used: [],
+          is_non_case: false,
+          show_emergency_banner: false,
+        }
+        L.warn('getEnhancedScoreResult not available — using fallback scoreDiseases')
       }
     } catch (scoreErr) {
-      console.warn('[SecondaryScreening] scoreDiseases error:', scoreErr)
-      result = { top_diagnoses: [], all_reportable: [], global_flags: [], overrides_fired: [], input_summary: {} }
+      L.warn('saveStep3AndAnalyse: intelligence call threw', scoreErr?.message ?? scoreErr)
+      enhanced = { top_diagnoses: [], all_reportable: [], global_flags: ['ANALYSIS_ERROR'], overrides_fired: [], input_summary: {}, syndrome: { syndrome: 'OTHER', confidence: 'LOW' }, ihr_risk: { risk_level: 'MEDIUM', routing_level: 'DISTRICT', ihr_alert_required: false }, non_case: { isNonCase: false }, clinical_validation: { vital_alerts: {}, critical_flags: [], clinical_warnings: [], needs_emergency_triage: false }, outbreak_context_used: [], is_non_case: false, show_emergency_banner: false }
     }
 
-    analysisResult.value = result
+    analysisResult.value = enhanced
 
-    // ── AUTO-SYNDROME CLASSIFICATION ────────────────────────────────────────
-    // Derived from symptom pattern first, then overridden by top disease if the
-    // engine gives a confident Priority-1 result. Officer can still edit in Step 4.
-    const autoSyndrome = deriveAutoSyndrome(presentSymptoms)
-    if (!caseDecision.syndrome_classification) {
-      // Only auto-set if officer hasn't already chosen one (re-entry scenario)
-      caseDecision.syndrome_classification = autoSyndrome
+    // ── GENERATE CLINICAL REPORT ───────────────────────────────────────────
+    // The report explains every decision the engine made in plain language,
+    // covering 10 sections: executive summary, clinical presentation, scoring
+    // breakdown, travel/epidemiology, exposure analysis, IHR framework,
+    // differential diagnosis, required actions, confidence assessment, overrides.
+    try {
+      if (window.DISEASES?.generateClinicalReport) {
+        const tc = vitals.temperature_value
+        const tcC = tc ? (vitals.temperature_unit === 'F' ? (tc - 32) * 5 / 9 : tc) : null
+        clinicalReport.value = window.DISEASES.generateClinicalReport(enhanced, {
+          vitals: {
+            temperature_c:     tcC,
+            oxygen_saturation: vitals.oxygen_saturation  || null,
+            pulse_rate:        vitals.pulse_rate          || null,
+            respiratory_rate:  vitals.respiratory_rate   || null,
+            bp_systolic:       vitals.bp_systolic         || null,
+          },
+          presentSymptoms:   presentSymptoms,
+          absentSymptoms:    absentSymptoms,
+          visitedCountries:  travelCountries.value.map(tc => ({
+            country_code: tc.country_code, travel_role: tc.travel_role || 'VISITED'
+          })),
+          exposures:         Object.values(exposuresMap),
+          travelerDirection: primaryScreening.value?.traveler_direction || null,
+          poeCode:           caseRecord.value?.poe_code || '',
+          travelerGender:    profile.traveler_gender || caseRecord.value?.traveler_gender || 'UNKNOWN',
+          travelerAge:       profile.traveler_age_years || null,
+          officerOverride:   { ...officerOverride },
+        })
+        L.ok('generateClinicalReport: OK — verdict=' + clinicalReport.value.verdict)
+      }
+    } catch (reportErr) {
+      L.warn('generateClinicalReport threw', reportErr?.message ?? reportErr)
+      clinicalReport.value = null
+    }
+
+    // ── AUTO-SET syndrome + risk from engine (officer can override in Step 4) ──
+    if (!caseDecision.syndrome_classification || !officerOverride.syndromeOverridden) {
+      caseDecision.syndrome_classification = enhanced.syndrome.syndrome
       autoSyndromeApplied.value = true
-      L.ok(`Auto-syndrome set to "${autoSyndrome}" from ${presentSymptoms.length} present symptoms`)
-    } else {
-      L.info(`Auto-syndrome would be "${autoSyndrome}" — officer already selected "${caseDecision.syndrome_classification}", not overriding`)
+      L.ok('Auto-syndrome set to "' + enhanced.syndrome.syndrome + '" (confidence=' + enhanced.syndrome.confidence + ')')
     }
 
-    // Build suspected disease records from top 5
-    if (result && result.top_diagnoses.length > 0) {
-      suspectedDiseases.value = result.top_diagnoses.slice(0, 5).map((d, i) => ({
-        client_uuid:            genUUID(),
-        secondary_screening_id: caseUuid.value,
-        disease_code:           d.disease_id,
-        rank_order:             i + 1,
-        confidence:             d.probability_like_percent ?? null,
-        reasoning:              (d.matched_hallmarks || []).slice(0, 3).join(', ') || null,
-        sync_status:            SYNC.UNSYNCED,
-      }))
+    // Auto-set risk level suggestion (officer can still change it)
+    if (!officerOverride.riskOverridden && enhanced.ihr_risk?.risk_level) {
+      caseDecision.risk_level = enhanced.ihr_risk.risk_level
     }
+
+    // NON-CASE auto-routing
+    if (enhanced.is_non_case && !officerOverride.overrideNonCase) {
+      caseDecision.syndrome_classification = 'NONE'
+      caseDecision.risk_level              = 'LOW'
+      caseDecision.final_disposition       = 'RELEASED'
+      L.ok('Non-case verdict applied — syndrome=NONE, risk=LOW, disposition=RELEASED')
+    }
+
+    // ── Build suspected disease records for DB (merge algorithm + officer additions) ──
+    const algorithmDiseases = enhanced.top_diagnoses.slice(0, 5).map((d, i) => ({
+      client_uuid:            genUUID(),
+      secondary_screening_id: caseUuid.value,
+      disease_code:           d.disease_id,
+      rank_order:             i + 1,
+      confidence:             d.probability_like_percent ?? null,
+      reasoning:              (d.matched_hallmarks || []).slice(0, 3).join(', ') || null,
+      sync_status:            SYNC.UNSYNCED,
+    }))
+
+    // Officer-added diseases at the end
+    const officerDiseases = officerOverride.addedDiseases.map((name, i) => ({
+      client_uuid:            genUUID(),
+      secondary_screening_id: caseUuid.value,
+      disease_code:           name.toUpperCase().replace(/\s+/g, '_').slice(0, 80),
+      rank_order:             algorithmDiseases.length + i + 1,
+      confidence:             null,
+      reasoning:              'OFFICER_CLINICAL_OVERRIDE',
+      sync_status:            SYNC.UNSYNCED,
+    }))
+
+    suspectedDiseases.value = [...algorithmDiseases, ...officerDiseases]
 
     step.value = 4
     // Sync exposures + current case to server in background
@@ -1971,8 +2211,17 @@ async function dispositionCase() {
     }
 
     // All writes: case + actions + suspected diseases + notification
-    await safeDbPut(STORE.SECONDARY_SCREENINGS, toPlain(updatedCase))
+    // ── FIX: ATOMIC WRITE — case + notification in one transaction ──────────
+    // Previously: two separate safeDbPut calls. If the second failed or the
+    // app crashed between them, the case showed CLOSED but the notification
+    // stayed IN_PROGRESS — causing data corruption in NotificationsCenter.
+    // Fix: dbAtomicWrite guarantees both writes succeed or neither does.
+    await dbAtomicWrite([
+      { store: STORE.SECONDARY_SCREENINGS, record: toPlain(updatedCase) },
+      { store: STORE.NOTIFICATIONS,        record: toPlain(updatedNotif) },
+    ])
 
+    // Child tables (non-critical — can fail without corrupting the primary state)
     await dbReplaceAll(
       STORE.SECONDARY_ACTIONS,
       'secondary_screening_id',
@@ -1987,25 +2236,34 @@ async function dispositionCase() {
       toPlain(suspectedDiseases.value)
     )
 
-    // If alert is triggered, create alert record
-    if (alertPreview.value) {
+    // ── IHR Alert creation ─────────────────────────────────────────────────
+    // Use ihr_alert_required from engine result when available, fall back to
+    // legacy alertPreview computed for backward compatibility.
+    const ihrAlertNeeded = analysisResult.value?.ihr_notification_required || alertPreview.value
+    if (ihrAlertNeeded) {
+      const alertCode = analysisResult.value?.ihr_risk?.triggered_rules?.[0]
+        || alertPreview.value?.alertCode
+        || ('CASE_' + (caseDecision.risk_level || 'HIGH'))
+      const routedTo  = analysisResult.value?.ihr_risk?.routing_level
+        || alertPreview.value?.routedTo
+        || 'PHEOC'
       const alertRecord = createRecordBase(localAuth, {
         secondary_screening_id:    caseUuid.value,
         generated_from:            'RULE_BASED',
         risk_level:                caseDecision.risk_level,
-        alert_code:                alertPreview.value.alertCode,
-        alert_title:               alertPreview.value.alertCode.replace(/_/g, ' '),
+        alert_code:                alertCode,
+        alert_title:               alertCode.replace(/_/g, ' '),
         alert_details:             caseDecision.officer_notes || null,
-        routed_to_level:           alertPreview.value.routedTo,
+        routed_to_level:           routedTo,
+        ihr_tier:                  analysisResult.value?.ihr_risk?.ihr_tier || null,
         status:                    'OPEN',
         acknowledged_by_user_id:   null,
         acknowledged_at:           null,
         closed_at:                 null,
       })
       await dbPut(STORE.ALERTS, toPlain(alertRecord))
+      L.ok('dispositionCase: alert record created', { alertCode, routedTo })
     }
-
-    await safeDbPut(STORE.NOTIFICATIONS, toPlain(updatedNotif))
 
     caseRecord.value = updatedCase
     notification.value = updatedNotif
@@ -2074,6 +2332,7 @@ async function openCase(localAuth) {
     notification.value = updatedNotif
 
     initSymptoms()
+    initExposuresFromCatalog()
     L.ok('openCase() complete', { caseUuid: newCase.client_uuid, notif_status: updatedNotif.status })
 
     // Attempt server sync in background — non-blocking, data is safe in IDB
@@ -2086,49 +2345,10 @@ async function openCase(localAuth) {
   }
 }
 
-// ─── AUTO SYNDROME DERIVATION ─────────────────────────────────────────────
-// Deterministic WHO-aligned syndrome classification from present symptom codes.
-// Evaluated in priority order — most specific / dangerous patterns first.
-// Returns one of the 11 SYNDROME codes. Called in saveStep3AndAnalyse().
-function deriveAutoSyndrome(presentCodes) {
-  const has = c => presentCodes.includes(c)
-  // Tier 1 — Haemorrhagic (highest — VHF must never be missed)
-  if (has('bleeding') || has('bleeding_gums_or_nose') || has('bloody_sputum') ||
-      has('petechial_or_purpuric_rash'))
-    return 'VHF'
-  // Tier 2 — Meningitis (fever + neck stiffness + neuro)
-  if (has('stiff_neck') && (has('fever') || has('high_fever') || has('sudden_onset_fever')) &&
-      (has('altered_consciousness') || has('photophobia') || has('seizures')))
-    return 'MENINGITIS'
-  // Tier 3 — Neurological
-  if (has('altered_consciousness') || has('seizures') || has('paralysis_acute_flaccid') ||
-      has('hydrophobia') || has('aerophobia'))
-    return 'NEUROLOGICAL'
-  // Tier 4 — Bloody diarrhoea
-  if (has('bloody_diarrhea')) return 'BLOODY_DIARRHEA'
-  // Tier 5 — SARI (fever + breathing difficulty)
-  if ((has('fever') || has('high_fever') || has('sudden_onset_fever')) &&
-      (has('shortness_of_breath') || has('difficulty_breathing') || has('rapid_breathing')))
-    return 'SARI'
-  // Tier 6 — Jaundice
-  if (has('jaundice') || has('dark_urine')) return 'JAUNDICE'
-  // Tier 7 — Febrile rash
-  if ((has('fever') || has('high_fever')) &&
-      (has('rash_maculopapular') || has('rash_vesicular_pustular') ||
-       has('rash_face_first') || has('painful_rash') || has('mucosal_lesions')))
-    return 'RASH_FEVER'
-  // Tier 8 — Acute watery diarrhoea / cholera pattern
-  if (has('watery_diarrhea') || has('rice_water_diarrhea') ||
-      (has('diarrhea') && has('severe_dehydration')))
-    return 'AWD'
-  // Tier 9 — ILI (fever + cough or sore throat)
-  if ((has('fever') || has('high_fever') || has('low_grade_fever') || has('sudden_onset_fever')) &&
-      (has('cough') || has('dry_cough') || has('sore_throat') || has('coryza')))
-    return 'ILI'
-  // Tier 10 — Any fever
-  if (has('fever') || has('high_fever') || has('sudden_onset_fever')) return 'OTHER'
-  return 'OTHER'
-}
+// deriveAutoSyndrome() REMOVED.
+// Replaced by window.DISEASES.deriveWHOSyndrome() in the intelligence layer.
+// The Vue calls window.DISEASES.getEnhancedScoreResult() which internally
+// calls deriveWHOSyndrome() and returns the result — no clinical logic here.
 
 // ─── NOTIFICATION VERIFICATION ────────────────────────────────────────────
 const notifVerify = reactive({
@@ -2757,6 +2977,7 @@ async function _doInitPage(source) {
       const sid = existing.client_uuid
       travelCountries.value  = await dbGetByIndex(STORE.SECONDARY_TRAVEL_COUNTRIES,   'secondary_screening_id', sid) || []
       initSymptoms()
+      initExposuresFromCatalog()
       const savedSymptoms    = await dbGetByIndex(STORE.SECONDARY_SYMPTOMS,            'secondary_screening_id', sid)
       for (const s of savedSymptoms) {
         if (symptomsMap[s.symptom_code]) {
@@ -3673,4 +3894,162 @@ onIonViewDidEnter(async () => {
   box-shadow: 0 4px 14px rgba(46,125,50,.35);
 }
 .sc-nav-btn--disposition:disabled { background: #ECEFF1; color: #90A4AE; box-shadow: none; }
+
+/* ── TRAVELER DIRECTION BADGE ─────────────────────────────── */
+.sc-dir-badge {
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  font-family: monospace;
+  flex-shrink: 0;
+}
+.sc-dir--entry   { background: #E3F2FD; color: #0D47A1; border: 1px solid #90CAF9; }
+.sc-dir--exit    { background: #F3E5F5; color: #4A148C; border: 1px solid #CE93D8; }
+.sc-dir--transit { background: #FFF3E0; color: #E65100; border: 1px solid #FFCC80; }
+
+/* ── NON-CASE BANNER ──────────────────────────────────────── */
+.sc-noncase-banner {
+  background: #E8F5E9; border: 1px solid #A5D6A7; border-radius: 8px;
+  padding: 12px 14px; margin-bottom: 12px; display: flex; flex-direction: column; gap: 6px;
+}
+.sc-nc-hdr {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 13px; font-weight: 800; color: #1B5E20;
+}
+.sc-nc-reason { font-size: 11px; color: #2E7D32; font-weight: 600; padding-left: 24px; }
+.sc-nc-action { font-size: 11px; color: #388E3C; font-weight: 700; padding-left: 24px; font-family: monospace; }
+.sc-nc-override-btn {
+  align-self: flex-start; margin-top: 4px;
+  padding: 6px 12px; border-radius: 5px;
+  font-size: 11px; font-weight: 700; cursor: pointer;
+  background: #FFF3E0; border: 1px solid #FF6D00; color: #E65100;
+}
+.sc-nc-override-note { display: flex; flex-direction: column; gap: 4px; }
+.sc-nc-override-lbl { font-size: 10px; font-weight: 700; color: #E65100; }
+.sc-override-input {
+  width: 100%; padding: 6px 10px; border: 1px solid #FFCC80; border-radius: 5px;
+  font-size: 11px; background: #FFFDE7; font-family: system-ui; resize: vertical; min-height: 50px;
+}
+
+/* ── OUTBREAK CONTEXT ─────────────────────────────────────── */
+.sc-outbreak-ctx {
+  background: #FFF3E0; border: 1px solid #FFCC80; border-radius: 8px;
+  padding: 10px 14px; margin-bottom: 12px; display: flex; flex-direction: column; gap: 6px;
+}
+.sc-oc-hdr { display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 700; color: #E65100; }
+.sc-oc-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.sc-oc-chip {
+  padding: 2px 8px; background: rgba(230,101,0,0.1); border: 1px solid rgba(230,101,0,0.3);
+  border-radius: 4px; font-size: 9.5px; font-weight: 700; color: #BF360C; font-family: monospace;
+  text-transform: capitalize;
+}
+.sc-oc-chip--more { background: rgba(0,0,0,0.05); color: rgba(0,0,0,0.5); border-color: rgba(0,0,0,0.15); }
+
+/* ── IHR RISK RESULT ──────────────────────────────────────── */
+.sc-ihr-result {
+  padding: 10px 14px; border-radius: 8px; margin-bottom: 12px;
+  display: flex; flex-direction: column; gap: 5px; border: 1px solid;
+}
+.sc-ihr--low      { background: #E8F5E9; border-color: #A5D6A7; }
+.sc-ihr--medium   { background: #FFF8E1; border-color: #FFD54F; }
+.sc-ihr--high     { background: #FFF3E0; border-color: #FFCC80; }
+.sc-ihr--critical { background: #FFEBEE; border-color: #EF9A9A; }
+.sc-ihr-hdr { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.sc-ihr-level {
+  font-size: 14px; font-weight: 900; font-family: monospace; letter-spacing: .5px;
+}
+.sc-ihr--low      .sc-ihr-level { color: #2E7D32; }
+.sc-ihr--medium   .sc-ihr-level { color: #F57F17; }
+.sc-ihr--high     .sc-ihr-level { color: #E65100; }
+.sc-ihr--critical .sc-ihr-level { color: #B71C1C; }
+.sc-ihr-routing { font-size: 10px; font-weight: 700; color: rgba(0,0,0,0.5); font-family: monospace; }
+.sc-ihr-alert-badge {
+  padding: 2px 8px; border-radius: 4px; font-size: 9px; font-weight: 900; letter-spacing: .8px;
+  background: #D32F2F; color: #fff; text-transform: uppercase; font-family: monospace;
+}
+.sc-ihr-reason { font-size: 10px; color: rgba(0,0,0,0.6); font-weight: 600; padding-left: 8px; }
+
+/* ── ENGINE SYNDROME HINT ─────────────────────────────────── */
+.sc-syn-engine-hint, .sc-risk-engine-suggest {
+  display: flex; align-items: flex-start; gap: 6px; padding: 8px 10px;
+  background: #E3F2FD; border: 1px solid #90CAF9; border-radius: 6px;
+  font-size: 11px; color: #0D47A1; font-weight: 600; margin-bottom: 8px;
+}
+.sc-risk-apply-btn {
+  margin-left: auto; padding: 3px 10px; border-radius: 4px; flex-shrink: 0;
+  font-size: 10px; font-weight: 800; cursor: pointer;
+  background: #1565C0; color: #fff; border: none;
+}
+
+/* ── DISEASE CARD — enhanced ──────────────────────────────── */
+.sc-dc-name-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.sc-dc-syn-match {
+  font-size: 9px; font-weight: 700; padding: 2px 6px; border-radius: 3px;
+  background: #E8F5E9; color: #2E7D32; border: 1px solid #A5D6A7; font-family: monospace;
+}
+.sc-dc-cfr { font-size: 9px; padding: 1px 5px; border-radius: 3px; background: #FFEBEE; color: #C62828; font-weight: 700; font-family: monospace; }
+.sc-dc-def-toggle {
+  font-size: 10px; color: #1565C0; font-weight: 700; background: none; border: none;
+  cursor: pointer; padding: 4px 0; text-decoration: underline; text-align: left;
+}
+.sc-dc-casedefs { background: #F5F5F5; border-radius: 6px; padding: 8px 10px; margin-top: 4px; display: flex; flex-direction: column; gap: 6px; }
+.sc-dc-def-row { display: flex; gap: 8px; align-items: flex-start; }
+.sc-dc-def-k { font-size: 8.5px; font-weight: 900; letter-spacing: .8px; text-transform: uppercase; font-family: monospace; flex-shrink: 0; width: 60px; padding-top: 1px; }
+.sc-dc-def-v { font-size: 10px; color: rgba(0,0,0,0.7); font-weight: 600; line-height: 1.4; }
+.sc-dc-def--suspected .sc-dc-def-k { color: #F57F17; }
+.sc-dc-def--confirmed  .sc-dc-def-k { color: #2E7D32; }
+.sc-dc-def--ihr        .sc-dc-def-k { color: #1565C0; }
+.sc-dc-def--action     .sc-dc-def-k { color: #B71C1C; }
+.sc-dc-def--action { background: #FFEBEE; border-radius: 4px; padding: 4px 6px; }
+
+/* ── OFFICER OVERRIDE ─────────────────────────────────────── */
+.sc-override-section {}
+.sc-override-hint { font-size: 11px; color: rgba(0,0,0,0.55); font-weight: 600; margin: 0 0 8px; line-height: 1.4; }
+.sc-override-add-row { display: flex; gap: 8px; }
+.sc-override-disease-input {
+  flex: 1; padding: 8px 10px; border: 1.5px solid #E0E0E0; border-radius: 6px;
+  font-size: 13px; background: #fff; color: #212121; min-width: 0;
+}
+.sc-override-disease-input::placeholder { color: rgba(0,0,0,0.3); }
+.sc-override-add-btn {
+  padding: 8px 14px; border-radius: 6px; font-size: 11px; font-weight: 800; cursor: pointer;
+  background: #1565C0; color: #fff; border: none; flex-shrink: 0;
+}
+.sc-override-add-btn:disabled { opacity: .4; }
+.sc-override-added { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.sc-override-tag {
+  display: flex; align-items: center; gap: 4px; padding: 4px 10px;
+  background: #E3F2FD; border: 1px solid #90CAF9; border-radius: 4px; font-size: 11px; font-weight: 700; color: #0D47A1;
+}
+.sc-override-rm { background: none; border: none; cursor: pointer; font-size: 14px; color: #1565C0; padding: 0 2px; line-height: 1; }
+
+/* ── NEW EXPOSURE UI ──────────────────────────────────────── */
+.sc-exp-cat { margin-bottom: 16px; }
+.sc-exp-cat-hdr {
+  font-size: 9.5px; font-weight: 800; letter-spacing: 1.5px; text-transform: uppercase;
+  color: rgba(0,0,0,0.45); padding: 8px 0 4px; border-bottom: 1px solid #EEEEEE; margin-bottom: 6px;
+  font-family: monospace;
+}
+.sc-exp-header-row { display: flex; align-items: flex-start; gap: 8px; flex-wrap: wrap; }
+.sc-exp-risk { font-size: 8.5px; font-weight: 900; padding: 1px 6px; border-radius: 3px; flex-shrink: 0; font-family: monospace; letter-spacing: .6px; }
+.sc-exp-risk--vhigh { background: #FFEBEE; color: #B71C1C; border: 1px solid #FFCDD2; }
+.sc-exp-risk--high  { background: #FFF3E0; color: #E65100; border: 1px solid #FFE0B2; }
+.sc-exp-desc { font-size: 10.5px; color: rgba(0,0,0,0.5); font-weight: 600; line-height: 1.4; margin: 2px 0 8px; }
+.sc-exp-card--yes { border-color: #EF9A9A; background: #FFEBEE; }
+.sc-exp-card--high { border-left: 3px solid #FF6D00; }
+.sc-exp-critical {
+  font-size: 10px; font-weight: 700; color: #B71C1C; background: #FFEBEE;
+  border-radius: 4px; padding: 4px 8px; margin-top: 4px; display: flex; gap: 6px;
+}
+.sc-exp-hisig {
+  display: flex; gap: 10px; align-items: flex-start; padding: 12px 14px;
+  background: #B71C1C; color: #fff; border-radius: 8px; margin-bottom: 12px;
+}
+.sc-exp-hisig-title { font-size: 12px; font-weight: 900; margin-bottom: 4px; }
+.sc-exp-hisig-row   { font-size: 10px; font-weight: 700; }
+.sc-exp-hisig-note  { font-size: 9.5px; color: rgba(255,255,255,0.8); font-weight: 600; }
+
 </style>
