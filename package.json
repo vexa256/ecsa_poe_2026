@@ -19,9 +19,13 @@
     "@capacitor/status-bar": "8.0.1",
     "@ionic/vue": "^8.0.0",
     "@ionic/vue-router": "^8.0.0",
+    "apexcharts": "^5.10.6",
+    "axios": "^1.15.0",
+    "dexie": "^4.3.0",
     "ionicons": "^7.0.0",
     "vue": "^3.3.0",
-    "vue-router": "^4.2.0"
+    "vue-router": "^4.2.0",
+    "vue3-apexcharts": "^1.11.1"
   },
   "devDependencies": {
     "@capacitor/cli": "8.1.0",

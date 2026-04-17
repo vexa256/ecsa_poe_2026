@@ -1,0 +1,3676 @@
+<template>
+  <IonPage>
+
+    <!-- ══════════════════════════════════════════════════════════════════
+         HEADER — Case context, progress stepper, sync badge
+    ══════════════════════════════════════════════════════════════════ -->
+    <IonHeader class="sc-header" :translucent="false">
+      <div class="sc-hdr-pattern" aria-hidden="true" />
+
+      <!-- Top bar: back + title + sync badge -->
+      <div class="sc-hdr-top">
+        <button class="sc-back-btn" type="button" aria-label="Back to referral queue" @click="goBackToQueue">
+          <svg viewBox="0 0 18 18" fill="none" stroke="rgba(255,255,255,0.85)" stroke-width="2.2" stroke-linecap="round">
+            <polyline points="11 4 6 9 11 14"/>
+          </svg>
+        </button>
+        <div class="sc-title-block">
+          <span class="sc-eyebrow">Secondary Screening · IHR Art. 23</span>
+          <div class="sc-page-title">{{ caseRecord ? 'Case in Progress' : 'Open Case' }}</div>
+        </div>
+        <div class="sc-hdr-right">
+          <div class="sc-sync-pill" :class="syncPillClass" aria-live="polite" @click="isAdmin ? _debugTap() : null" style="cursor:default">
+            <span class="sc-sync-dot" />
+            <span class="sc-sync-txt">{{ syncPillLabel }}</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Case summary strip — only when case is loaded -->
+      <div v-if="notification" class="sc-case-strip">
+        <div class="sc-case-ic" aria-hidden="true">
+          <svg viewBox="0 0 14 14" fill="none" stroke="rgba(255,255,255,.8)" stroke-width="1.5" stroke-linecap="round">
+            <circle cx="7" cy="5" r="3"/><path d="M2 13c0-2.8 2.2-5 5-5s5 2.2 5 5"/>
+          </svg>
+        </div>
+        <div class="sc-case-info">
+          <div class="sc-case-name">{{ primaryScreening?.traveler_full_name || 'Anonymous Traveler' }}</div>
+          <div class="sc-case-meta">
+            {{ genderLabel(notification.gender ?? primaryScreening?.gender) }}
+            <span v-if="primaryScreening?.temperature_value"> · {{ primaryScreening.temperature_value }}°{{ primaryScreening.temperature_unit || 'C' }}</span>
+            · {{ auth.poe_code ?? '—' }}
+          </div>
+        </div>
+        <div class="sc-prio-pill" :class="priorityClass">{{ notification.priority || 'NORMAL' }}</div>
+      </div>
+
+      <!-- 4-step progress bar -->
+      <div class="sc-stepper" role="progressbar" :aria-valuenow="step" aria-valuemin="1" aria-valuemax="4">
+        <div v-for="(s, i) in STEPS" :key="s.key" class="sc-step-wrap">
+          <button
+            class="sc-step"
+            :class="{
+              'sc-step--done':   step > i + 1,
+              'sc-step--active': step === i + 1,
+              'sc-step--future': step < i + 1,
+            }"
+            type="button"
+            :aria-label="'Step ' + (i+1) + ': ' + s.label"
+            @click="jumpToStep(i + 1)"
+          >
+            <span class="sc-step-node">
+              <svg v-if="step > i + 1" viewBox="0 0 12 12" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round"><polyline points="2 6 5 9 10 3"/></svg>
+              <span v-else class="sc-step-num">{{ i + 1 }}</span>
+            </span>
+            <span class="sc-step-lbl">{{ s.label }}</span>
+          </button>
+          <div v-if="i < STEPS.length - 1" class="sc-step-line" :class="{ 'sc-step-line--done': step > i + 1 }" aria-hidden="true" />
+        </div>
+      </div>
+    </IonHeader>
+
+    <!-- ══════════════════════════════════════════════════════════════════
+         CONTENT
+    ══════════════════════════════════════════════════════════════════ -->
+    <IonContent class="sc-content" :scrollY="true">
+
+      <!-- LOADING -->
+      <div v-if="loading" class="sc-loading" aria-live="polite" aria-busy="true">
+        <div class="sc-spinner" aria-hidden="true" />
+        <div class="sc-loading-txt">Loading case…</div>
+      </div>
+
+      <!-- NOT FOUND -->
+      <div v-else-if="notFound" class="sc-guard sc-guard--warn" role="alert">
+        <svg viewBox="0 0 20 20" fill="none" stroke="#fff" stroke-width="1.6" stroke-linecap="round">
+          <circle cx="10" cy="10" r="8"/><line x1="10" y1="6" x2="10" y2="11"/><circle cx="10" cy="14" r=".8" fill="#fff"/>
+        </svg>
+        <div>
+          <div class="sc-guard-title">Notification Not Found</div>
+          <div class="sc-guard-sub">The referral could not be located in local storage. It may not have synced to this device yet.</div>
+        </div>
+      </div>
+
+      <!-- ── WIZARD BODY ── -->
+      <div v-else class="sc-body">
+
+        <!-- POE mismatch advisory — non-blocking, supervisor override scenario -->
+        <div v-if="poeMismatch" class="sc-poe-warn" role="status">
+          <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+            <circle cx="7" cy="7" r="5"/><line x1="7" y1="4.5" x2="7" y2="7.5"/><circle cx="7" cy="9.5" r=".5" fill="currentColor"/>
+          </svg>
+          <span>This referral belongs to <strong>{{ notification?.poe_code }}</strong>. You are logged in at <strong>{{ auth.poe_code }}</strong>. Proceed only if authorised.</span>
+        </div>
+
+        <!-- ════════════════════════════════════════════════════
+             STEP 1 — TRAVELER PROFILE & TRAVEL
+        ════════════════════════════════════════════════════ -->
+        <div v-show="step === 1">
+
+          <!-- Section: Traveler Identity -->
+          <div class="sc-section-hdr">
+            <span class="sc-sec-num sc-sec-num--blue">1</span>
+            <span class="sc-sec-title">Traveler Identity</span>
+            <span class="sc-sec-badge sc-sec-badge--opt">Optional</span>
+          </div>
+
+          <div class="sc-card">
+            <!-- Full name -->
+            <div class="sc-field-row">
+              <div class="sc-field-ic">
+                <svg viewBox="0 0 14 14" fill="none" stroke="#1565C0" stroke-width="1.5" stroke-linecap="round"><circle cx="7" cy="5" r="3"/><path d="M2 13c0-2.8 2.2-5 5-5s5 2.2 5 5"/></svg>
+              </div>
+              <div class="sc-field-body">
+                <label class="sc-field-lbl" for="sc-traveler-name">Full Name</label>
+                <input
+                  id="sc-traveler-name" class="sc-field-input"
+                  type="text" maxlength="150" placeholder="Enter traveler name…"
+                  v-model.trim="profile.traveler_full_name"
+                  autocomplete="off"
+                />
+              </div>
+            </div>
+
+            <!-- Gender (pre-filled, editable) -->
+            <div class="sc-field-row">
+              <div class="sc-field-ic">
+                <svg viewBox="0 0 14 14" fill="none" stroke="#1565C0" stroke-width="1.5" stroke-linecap="round"><circle cx="7" cy="7" r="5"/><line x1="7" y1="4" x2="7" y2="10"/><line x1="4" y1="7" x2="10" y2="7"/></svg>
+              </div>
+              <div class="sc-field-body">
+                <label class="sc-field-lbl">Gender</label>
+                <div class="sc-gender-row">
+                  <button
+                    v-for="g in GENDERS" :key="g.value"
+                    class="sc-gender-btn"
+                    :class="{ 'sc-gender-btn--active': profile.traveler_gender === g.value }"
+                    type="button" @click="profile.traveler_gender = g.value"
+                  >{{ g.label }}</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Age -->
+            <div class="sc-field-row">
+              <div class="sc-field-ic">
+                <svg viewBox="0 0 14 14" fill="none" stroke="#1565C0" stroke-width="1.5" stroke-linecap="round"><rect x="2" y="3" width="10" height="9" rx="2"/><line x1="5" y1="1" x2="5" y2="5"/><line x1="9" y1="1" x2="9" y2="5"/></svg>
+              </div>
+              <div class="sc-field-body">
+                <label class="sc-field-lbl" for="sc-age">Age (years)</label>
+                <input
+                  id="sc-age" class="sc-field-input sc-field-input--short"
+                  type="number" min="0" max="120" placeholder="e.g. 34"
+                  v-model.number="profile.traveler_age_years"
+                />
+              </div>
+            </div>
+
+            <!-- Nationality -->
+            <div class="sc-field-row">
+              <div class="sc-field-ic">
+                <svg viewBox="0 0 14 14" fill="none" stroke="#1565C0" stroke-width="1.5" stroke-linecap="round"><circle cx="7" cy="7" r="5"/><path d="M2 7h10M7 2c-1.5 2-2 3.3-2 5s.5 3 2 5M7 2c1.5 2 2 3.3 2 5s-.5 3-2 5"/></svg>
+              </div>
+              <div class="sc-field-body">
+                <label class="sc-field-lbl" for="sc-nationality">Nationality</label>
+                <select id="sc-nationality" class="sc-field-select" v-model="profile.traveler_nationality_country_code">
+                  <option value="">— Select country —</option>
+                  <option v-for="c in COUNTRY_LIST" :key="c.code2" :value="c.code2">{{ c.name }}</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <!-- Section: Travel Document -->
+          <div class="sc-section-hdr" style="margin-top:16px">
+            <span class="sc-sec-num sc-sec-num--purple">2</span>
+            <span class="sc-sec-title">Travel Document</span>
+            <span class="sc-sec-badge sc-sec-badge--opt">Optional</span>
+          </div>
+
+          <div class="sc-card">
+            <!-- Doc type -->
+            <div class="sc-field-row">
+              <div class="sc-field-ic">
+                <svg viewBox="0 0 14 14" fill="none" stroke="#6A1B9A" stroke-width="1.5" stroke-linecap="round"><rect x="2" y="1" width="10" height="12" rx="2"/><line x1="5" y1="5" x2="9" y2="5"/><line x1="5" y1="8" x2="9" y2="8"/></svg>
+              </div>
+              <div class="sc-field-body">
+                <label class="sc-field-lbl">Document Type</label>
+                <div class="sc-chip-row">
+                  <button
+                    v-for="dt in DOC_TYPES" :key="dt.value"
+                    class="sc-chip-btn"
+                    :class="{ 'sc-chip-btn--active': profile.travel_document_type === dt.value }"
+                    type="button" @click="profile.travel_document_type = dt.value"
+                  >{{ dt.label }}</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Doc number -->
+            <div class="sc-field-row sc-field-row--last">
+              <div class="sc-field-ic">
+                <svg viewBox="0 0 14 14" fill="none" stroke="#6A1B9A" stroke-width="1.5" stroke-linecap="round"><circle cx="7" cy="7" r="5"/><text x="4" y="10" font-size="5" fill="#6A1B9A">#</text></svg>
+              </div>
+              <div class="sc-field-body">
+                <label class="sc-field-lbl" for="sc-docnum">Document Number</label>
+                <input
+                  id="sc-docnum" class="sc-field-input"
+                  type="text" maxlength="60" placeholder="Passport / ID number…"
+                  v-model.trim="profile.travel_document_number"
+                  autocomplete="off"
+                />
+              </div>
+            </div>
+          </div>
+
+          <!-- Section: Travel Details -->
+          <div class="sc-section-hdr" style="margin-top:16px">
+            <span class="sc-sec-num sc-sec-num--orange">3</span>
+            <span class="sc-sec-title">Journey Information</span>
+            <span class="sc-sec-badge sc-sec-badge--opt">Optional</span>
+          </div>
+
+          <div class="sc-card">
+            <!-- Origin country -->
+            <div class="sc-field-row">
+              <div class="sc-field-ic">
+                <svg viewBox="0 0 14 14" fill="none" stroke="#E65100" stroke-width="1.5" stroke-linecap="round"><path d="M2 12L5 2l4 8 3-4 2 6"/></svg>
+              </div>
+              <div class="sc-field-body">
+                <label class="sc-field-lbl" for="sc-origin">Journey Origin Country</label>
+                <select id="sc-origin" class="sc-field-select" v-model="profile.journey_start_country_code">
+                  <option value="">— Where did journey begin? —</option>
+                  <option v-for="c in COUNTRY_LIST" :key="c.code2" :value="c.code2">{{ c.name }}</option>
+                </select>
+              </div>
+            </div>
+
+            <!-- Conveyance type -->
+            <div class="sc-field-row">
+              <div class="sc-field-ic">
+                <svg viewBox="0 0 14 14" fill="none" stroke="#E65100" stroke-width="1.5" stroke-linecap="round"><path d="M1 11h12M3 11V7l4-5 4 5v4"/></svg>
+              </div>
+              <div class="sc-field-body">
+                <label class="sc-field-lbl">Mode of Transport</label>
+                <div class="sc-chip-row">
+                  <button
+                    v-for="ct in CONVEYANCE_TYPES" :key="ct.value"
+                    class="sc-chip-btn"
+                    :class="{ 'sc-chip-btn--active': profile.conveyance_type === ct.value }"
+                    type="button" @click="profile.conveyance_type = ct.value"
+                  >{{ ct.label }}</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Flight/vessel ID (only for AIR/SEA) -->
+            <div v-if="profile.conveyance_type === 'AIR' || profile.conveyance_type === 'SEA'" class="sc-field-row">
+              <div class="sc-field-ic">
+                <svg viewBox="0 0 14 14" fill="none" stroke="#E65100" stroke-width="1.5" stroke-linecap="round"><line x1="2" y1="7" x2="12" y2="7"/><line x1="9" y1="4" x2="12" y2="7"/><line x1="9" y1="10" x2="12" y2="7"/></svg>
+              </div>
+              <div class="sc-field-body">
+                <label class="sc-field-lbl" for="sc-convid">
+                  {{ profile.conveyance_type === 'AIR' ? 'Flight Number' : 'Vessel Name' }}
+                </label>
+                <input
+                  id="sc-convid" class="sc-field-input"
+                  type="text" maxlength="80"
+                  :placeholder="profile.conveyance_type === 'AIR' ? 'e.g. KQ101' : 'e.g. MV Victoria'"
+                  v-model.trim="profile.conveyance_identifier"
+                />
+              </div>
+            </div>
+
+            <!-- Arrival datetime -->
+            <div class="sc-field-row sc-field-row--last">
+              <div class="sc-field-ic">
+                <svg viewBox="0 0 14 14" fill="none" stroke="#E65100" stroke-width="1.5" stroke-linecap="round"><circle cx="7" cy="7" r="5"/><polyline points="7 4 7 7 9 9"/></svg>
+              </div>
+              <div class="sc-field-body">
+                <label class="sc-field-lbl" for="sc-arrival">Arrival Date/Time</label>
+                <input
+                  id="sc-arrival" class="sc-field-input"
+                  type="datetime-local"
+                  v-model="profile.arrival_datetime_input"
+                />
+              </div>
+            </div>
+          </div>
+
+          <!-- Section: Countries Visited (21-day IHR lookback) -->
+          <div class="sc-section-hdr" style="margin-top:16px">
+            <span class="sc-sec-num sc-sec-num--green">4</span>
+            <span class="sc-sec-title">Countries Visited (Last 21 Days)</span>
+            <span class="sc-sec-badge sc-sec-badge--req">IHR Lookback</span>
+          </div>
+
+          <div v-if="travelCountries.length === 0" class="sc-empty-travel">
+            <svg viewBox="0 0 20 20" fill="none" stroke="#B0BEC5" stroke-width="1.4" stroke-linecap="round"><circle cx="10" cy="10" r="8"/><path d="M2 10h16M10 2c-2 2.5-3 5-3 8s1 5.5 3 8M10 2c2 2.5 3 5 3 8s-1 5.5-3 8"/></svg>
+            <span>No countries added yet</span>
+          </div>
+
+          <div v-for="(tc, idx) in travelCountries" :key="idx" class="sc-tc-row">
+            <select class="sc-tc-select" v-model="tc.country_code" :aria-label="'Country ' + (idx+1)">
+              <option value="">— Country —</option>
+              <option v-for="c in COUNTRY_LIST" :key="c.code2" :value="c.code2">{{ c.name }}</option>
+            </select>
+            <select class="sc-tc-role" v-model="tc.travel_role" :aria-label="'Role for country ' + (idx+1)">
+              <option value="VISITED">Visited</option>
+              <option value="TRANSIT">Transit</option>
+            </select>
+            <button class="sc-tc-remove" type="button" :aria-label="'Remove country ' + (idx+1)" @click="removeTravelCountry(idx)">
+              <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="2" y1="2" x2="10" y2="10"/><line x1="10" y1="2" x2="2" y2="10"/></svg>
+            </button>
+          </div>
+
+          <button class="sc-add-country-btn" type="button" @click="addTravelCountry">
+            <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="7" y1="2" x2="7" y2="12"/><line x1="2" y1="7" x2="12" y2="7"/></svg>
+            Add Country
+          </button>
+
+          <!-- Contact info -->
+          <div class="sc-section-hdr" style="margin-top:16px">
+            <span class="sc-sec-num sc-sec-num--blue">5</span>
+            <span class="sc-sec-title">Contact Information</span>
+            <span class="sc-sec-badge sc-sec-badge--opt">Optional</span>
+          </div>
+
+          <div class="sc-card">
+            <div class="sc-field-row">
+              <div class="sc-field-ic">
+                <svg viewBox="0 0 14 14" fill="none" stroke="#1565C0" stroke-width="1.5" stroke-linecap="round"><path d="M2 2h3l1.5 3.5L5 7s1 2 4 4l1.5-1.5L14 11v3s-1.2 1-3 0C5 11 2 5 2 2z"/></svg>
+              </div>
+              <div class="sc-field-body">
+                <label class="sc-field-lbl" for="sc-phone">Phone Number</label>
+                <input
+                  id="sc-phone" class="sc-field-input"
+                  type="tel" maxlength="40" placeholder="e.g. 25678927376"
+                  v-model.trim="profile.phone_number"
+                />
+              </div>
+            </div>
+            <div class="sc-field-row sc-field-row--last">
+              <div class="sc-field-ic">
+                <svg viewBox="0 0 14 14" fill="none" stroke="#1565C0" stroke-width="1.5" stroke-linecap="round"><path d="M7 1C4.2 1 2 3.2 2 6c0 4 5 7 5 7s5-3 5-7c0-2.8-2.2-5-5-5z"/><circle cx="7" cy="6" r="1.5"/></svg>
+              </div>
+              <div class="sc-field-body">
+                <label class="sc-field-lbl" for="sc-dest-district">Destination District</label>
+                <input
+                  id="sc-dest-district" class="sc-field-input"
+                  type="text" maxlength="30" placeholder="e.g. Kampala District"
+                  v-model.trim="profile.destination_district_code"
+                />
+              </div>
+            </div>
+          </div>
+
+          <div style="height:8px"/>
+        </div>
+        <!-- /STEP 1 -->
+
+
+        <!-- ════════════════════════════════════════════════════
+             STEP 2 — SYMPTOMS
+        ════════════════════════════════════════════════════ -->
+        <div v-show="step === 2">
+
+          <!-- Header + count -->
+          <div class="sc-section-hdr">
+            <span class="sc-sec-num sc-sec-num--orange">S</span>
+            <span class="sc-sec-title">Symptom Checklist</span>
+            <span class="sc-sym-count" aria-live="polite">
+              {{ presentSymptomCount }} present
+            </span>
+          </div>
+
+          <div class="sc-sym-intro">
+            Tap each symptom the traveler is currently experiencing. Unknown or absent symptoms should remain off.
+          </div>
+
+          <!-- Symptom groups -->
+          <div v-for="grp in SYMPTOM_GROUPS" :key="grp.key" class="sc-sym-group">
+            <div class="sc-sym-group-hdr">
+              <span class="sc-sym-group-dot" :style="{ background: grp.color }" aria-hidden="true" />
+              {{ grp.label }}
+            </div>
+            <div class="sc-sym-grid">
+              <button
+                v-for="sym in grp.symptoms" :key="sym.code"
+                class="sc-sym-card"
+                :class="{ 'sc-sym-card--on': symState(sym.code) === 1, 'sc-sym-card--off': symState(sym.code) === 0 }"
+                type="button"
+                :aria-pressed="symState(sym.code) === 1"
+                :aria-label="sym.label"
+                @click="toggleSymptom(sym.code)"
+              >
+                <span class="sc-sym-indicator" aria-hidden="true">
+                  <svg v-if="symState(sym.code) === 1" viewBox="0 0 10 10" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round"><polyline points="1 5 4 8 9 2"/></svg>
+                </span>
+                <span class="sc-sym-name" :class="{ 'sc-sym-name--on': symState(sym.code) === 1 }">{{ sym.label }}</span>
+              </button>
+            </div>
+
+            <!-- Onset date inputs for present symptoms that require it -->
+            <div v-for="sym in grp.symptoms.filter(s => s.requiresOnset && symState(s.code) === 1)" :key="'onset-' + sym.code" class="sc-onset-row">
+              <div class="sc-onset-ic" aria-hidden="true">
+                <svg viewBox="0 0 12 12" fill="none" stroke="#E65100" stroke-width="1.5" stroke-linecap="round"><circle cx="6" cy="6" r="4"/><polyline points="6 3.5 6 6 7.5 7.5"/></svg>
+              </div>
+              <div class="sc-onset-body">
+                <label class="sc-onset-lbl" :for="'onset-' + sym.code">{{ sym.label }} — onset date</label>
+                <input
+                  :id="'onset-' + sym.code"
+                  class="sc-onset-input"
+                  type="date"
+                  :max="todayDate"
+                  v-model="getSymptomRecord(sym.code).onset_date"
+                />
+              </div>
+            </div>
+          </div>
+
+          <!-- ── Optional Clinical Data (toggleable) ── -->
+          <div class="sc-vitals-toggle-hdr" @click="showVitals = !showVitals" role="button" :aria-expanded="showVitals">
+            <div class="sc-vitals-toggle-left">
+              <div class="sc-vitals-toggle-ic" aria-hidden="true">
+                <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M2 8h2l2-6 3 10 2-6 1 2h2"/></svg>
+              </div>
+              <span class="sc-vitals-toggle-lbl">Clinical Vitals &amp; Triage</span>
+              <span class="sc-vitals-badge">Optional</span>
+            </div>
+            <svg class="sc-vitals-chevron" :class="{ 'sc-vitals-chevron--open': showVitals }" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+              <polyline points="2 4 6 8 10 4"/>
+            </svg>
+          </div>
+
+          <div v-show="showVitals" class="sc-vitals-panel">
+            <div class="sc-vitals-note">Complete only if measurement equipment is available at this POE.</div>
+
+            <!-- Temperature -->
+            <div class="sc-vt-row">
+              <label class="sc-vt-lbl">Temperature</label>
+              <div class="sc-vt-inputs">
+                <input
+                  class="sc-vt-num" type="number" step="0.1"
+                  :min="vitals.temperature_unit === 'F' ? 77 : 25"
+                  :max="vitals.temperature_unit === 'F' ? 113 : 45"
+                  placeholder="e.g. 38.2"
+                  v-model.number="vitals.temperature_value"
+                />
+                <select class="sc-vt-unit" v-model="vitals.temperature_unit" aria-label="Temperature unit">
+                  <option value="C">°C</option>
+                  <option value="F">°F</option>
+                </select>
+              </div>
+              <span v-if="tempWarning" class="sc-vt-warn" :class="tempWarnClass" role="alert">{{ tempWarning }}</span>
+            </div>
+
+            <!-- Pulse + RR -->
+            <div class="sc-vt-pair">
+              <div class="sc-vt-row sc-vt-row--half">
+                <label class="sc-vt-lbl">Pulse (bpm)</label>
+                <input class="sc-vt-num" type="number" min="20" max="250" placeholder="e.g. 88" v-model.number="vitals.pulse_rate" />
+                <span v-if="pulseWarning" class="sc-vt-warn sc-vt-warn--sm" role="alert">{{ pulseWarning }}</span>
+              </div>
+              <div class="sc-vt-row sc-vt-row--half">
+                <label class="sc-vt-lbl">Resp. Rate (/min)</label>
+                <input class="sc-vt-num" type="number" min="5" max="60" placeholder="e.g. 18" v-model.number="vitals.respiratory_rate" />
+                <span v-if="rrWarning" class="sc-vt-warn sc-vt-warn--sm" role="alert">{{ rrWarning }}</span>
+              </div>
+            </div>
+
+            <!-- BP -->
+            <div class="sc-vt-pair">
+              <div class="sc-vt-row sc-vt-row--half">
+                <label class="sc-vt-lbl">BP Systolic (mmHg)</label>
+                <input class="sc-vt-num" type="number" min="40" max="300" placeholder="e.g. 120" v-model.number="vitals.bp_systolic" />
+              </div>
+              <div class="sc-vt-row sc-vt-row--half">
+                <label class="sc-vt-lbl">BP Diastolic</label>
+                <input class="sc-vt-num" type="number" min="20" max="200" placeholder="e.g. 80" v-model.number="vitals.bp_diastolic" />
+              </div>
+            </div>
+
+            <!-- SpO2 -->
+            <div class="sc-vt-row">
+              <label class="sc-vt-lbl">SpO₂ (%)</label>
+              <input class="sc-vt-num sc-vt-num--short" type="number" min="50" max="100" step="0.5" placeholder="e.g. 97.5" v-model.number="vitals.oxygen_saturation" />
+              <span v-if="spo2Warning" class="sc-vt-warn" :class="spo2WarnClass" role="alert">{{ spo2Warning }}</span>
+            </div>
+
+            <!-- Triage category -->
+            <div class="sc-vt-row">
+              <label class="sc-vt-lbl">Triage Category</label>
+              <div class="sc-triage-row">
+                <button
+                  v-for="tr in TRIAGE_CATS" :key="tr.value"
+                  class="sc-triage-btn"
+                  :class="['sc-triage-btn--' + tr.value.toLowerCase(), vitals.triage_category === tr.value && 'sc-triage-btn--active']"
+                  type="button"
+                  @click="vitals.triage_category = tr.value"
+                >
+                  <span class="sc-triage-lbl">{{ tr.label }}</span>
+                  <span class="sc-triage-sub">{{ tr.sub }}</span>
+                </button>
+              </div>
+            </div>
+
+            <!-- Emergency signs + General appearance -->
+            <div class="sc-vt-pair">
+              <div class="sc-vt-row sc-vt-row--half">
+                <label class="sc-vt-lbl">Emergency Signs</label>
+                <div class="sc-bool-row">
+                  <button class="sc-bool-btn" :class="{ 'sc-bool-btn--yes': vitals.emergency_signs_present === 1 }" type="button" @click="vitals.emergency_signs_present = vitals.emergency_signs_present === 1 ? 0 : 1">{{ vitals.emergency_signs_present === 1 ? 'YES ✓' : 'No' }}</button>
+                </div>
+                <span v-if="vitals.emergency_signs_present === 1" class="sc-vt-warn sc-vt-warn--sm sc-vt-warn--crit">Requires EMERGENCY triage</span>
+              </div>
+              <div class="sc-vt-row sc-vt-row--half">
+                <label class="sc-vt-lbl">General Appearance</label>
+                <select class="sc-field-select" v-model="vitals.general_appearance" aria-label="General appearance">
+                  <option value="">— Select —</option>
+                  <option value="WELL">Well</option>
+                  <option value="UNWELL">Unwell</option>
+                  <option value="SEVERELY_ILL">Severely Ill</option>
+                </select>
+              </div>
+            </div>
+
+          </div>
+          <!-- /vitals panel -->
+
+          <div style="height:8px"/>
+        </div>
+        <!-- /STEP 2 -->
+
+
+        <!-- ════════════════════════════════════════════════════
+             STEP 3 — STRUCTURED EXPOSURE QUESTIONNAIRE
+        ════════════════════════════════════════════════════ -->
+        <div v-show="step === 3">
+
+          <div class="sc-section-hdr">
+            <span class="sc-sec-num sc-sec-num--red">E</span>
+            <span class="sc-sec-title">Structured Exposure Questionnaire</span>
+          </div>
+
+          <div class="sc-exposure-intro">
+            Ask the traveler each question. Select the most accurate response.
+            <strong>Unknown</strong> is the default — only change to Yes or No when certain.
+          </div>
+
+          <div class="sc-exposure-list">
+            <div
+              v-for="(exp, idx) in exposures"
+              :key="exp.db_code"
+              class="sc-exp-card"
+            >
+              <div class="sc-exp-num" aria-hidden="true">{{ idx + 1 }}</div>
+              <div class="sc-exp-body">
+                <p class="sc-exp-question">{{ exp.question }}</p>
+                <div class="sc-exp-btns" role="group" :aria-label="'Answer for: ' + exp.question">
+                  <button
+                    class="sc-exp-btn sc-exp-btn--yes"
+                    :class="{ 'sc-exp-btn--active': exp.response === 'YES' }"
+                    type="button"
+                    @click="exp.response = exp.response === 'YES' ? 'UNKNOWN' : 'YES'"
+                    :aria-pressed="exp.response === 'YES'"
+                  >Yes</button>
+                  <button
+                    class="sc-exp-btn sc-exp-btn--no"
+                    :class="{ 'sc-exp-btn--active': exp.response === 'NO' }"
+                    type="button"
+                    @click="exp.response = exp.response === 'NO' ? 'UNKNOWN' : 'NO'"
+                    :aria-pressed="exp.response === 'NO'"
+                  >No</button>
+                  <button
+                    class="sc-exp-btn sc-exp-btn--unk"
+                    :class="{ 'sc-exp-btn--active': exp.response === 'UNKNOWN' }"
+                    type="button"
+                    @click="exp.response = 'UNKNOWN'"
+                    :aria-pressed="exp.response === 'UNKNOWN'"
+                  >Unknown</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Summary of YES responses -->
+          <div v-if="yesExposureCount > 0" class="sc-exp-summary" role="status" aria-live="polite">
+            <svg viewBox="0 0 14 14" fill="none" stroke="#E65100" stroke-width="1.5" stroke-linecap="round"><path d="M7 1L1 12h12L7 1z"/><line x1="7" y1="5.5" x2="7" y2="8.5"/><circle cx="7" cy="10.5" r=".6" fill="#E65100"/></svg>
+            <span><strong>{{ yesExposureCount }}</strong> risk exposure{{ yesExposureCount > 1 ? 's' : '' }} confirmed — will be factored into analysis</span>
+          </div>
+
+          <div style="height:8px"/>
+        </div>
+        <!-- /STEP 3 -->
+
+
+        <!-- ════════════════════════════════════════════════════
+             STEP 4 — CLINICAL ANALYSIS & DISPOSITION
+        ════════════════════════════════════════════════════ -->
+        <div v-show="step === 4">
+
+          <!-- ── Analysis Results ── -->
+          <div class="sc-section-hdr">
+            <span class="sc-sec-num sc-sec-num--red">A</span>
+            <span class="sc-sec-title">Disease Intelligence Analysis</span>
+            <span class="sc-sec-badge sc-sec-badge--warn">AI-Assisted</span>
+          </div>
+
+          <!-- Insufficient data warning -->
+          <div v-if="analysisResult && analysisResult.global_flags.includes('INSUFFICIENT_DATA')" class="sc-insuff-warn" role="alert">
+            <svg viewBox="0 0 14 14" fill="none" stroke="#E65100" stroke-width="1.5" stroke-linecap="round"><circle cx="7" cy="7" r="5"/><line x1="7" y1="4" x2="7" y2="7.5"/><circle cx="7" cy="9.5" r=".5" fill="#E65100"/></svg>
+            <span>Insufficient data — fewer than 2 symptoms confirmed. Analysis confidence is very low. Gather more clinical information.</span>
+          </div>
+
+          <!-- VHF / critical override banners -->
+          <div
+            v-for="flag in criticalFlags"
+            :key="flag"
+            class="sc-flag-banner"
+            role="alert"
+            aria-live="assertive"
+          >
+            <svg viewBox="0 0 14 14" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round"><path d="M7 1L1 12h12L7 1z"/><line x1="7" y1="5" x2="7" y2="8.5"/><circle cx="7" cy="10.5" r=".7" fill="#fff"/></svg>
+            <span class="sc-flag-txt">{{ FLAG_MESSAGES[flag] || flag }}</span>
+          </div>
+
+          <!-- Top disease cards -->
+          <div v-if="analysisResult && analysisResult.top_diagnoses.length > 0" class="sc-disease-list">
+            <div
+              v-for="(d, idx) in analysisResult.top_diagnoses.slice(0, 5)"
+              :key="d.disease_id"
+              class="sc-disease-card"
+              :class="'sc-disease-card--' + (d.confidence_band || 'low')"
+            >
+              <div class="sc-dc-rank" :class="idx === 0 ? 'sc-dc-rank--top' : ''" aria-label="Rank">{{ idx + 1 }}</div>
+              <div class="sc-dc-body">
+                <div class="sc-dc-name">{{ d.name }}</div>
+                <div class="sc-dc-meta">
+                  <span class="sc-dc-score">Score: {{ d.final_score }}</span>
+                  <span class="sc-dc-band" :class="'sc-dc-band--' + (d.confidence_band || 'low')">{{ d.confidence_band }}</span>
+                  <span v-if="d.ihr_category" class="sc-dc-ihr">{{ d.ihr_category }}</span>
+                </div>
+                <div v-if="d.matched_hallmarks.length > 0" class="sc-dc-hallmarks">
+                  <span class="sc-dc-hlbl">Key: </span>
+                  <span v-for="h in d.matched_hallmarks" :key="h" class="sc-dc-htag">{{ h.replace(/_/g,' ') }}</span>
+                </div>
+              </div>
+              <div class="sc-dc-pct" :class="'sc-dc-pct--' + (d.confidence_band || 'low')">
+                {{ d.probability_like_percent != null ? d.probability_like_percent + '%' : '' }}
+              </div>
+            </div>
+          </div>
+
+          <!-- No analysis yet -->
+          <div v-else-if="!analysisResult" class="sc-empty-analysis" role="status">
+            <svg viewBox="0 0 20 20" fill="none" stroke="#B0BEC5" stroke-width="1.4" stroke-linecap="round"><circle cx="10" cy="10" r="8"/><path d="M6 10h8M10 6v8"/></svg>
+            <span>Analysis not yet run. Go back to step 3 and tap "Analyse →"</span>
+          </div>
+
+          <!-- ── Syndrome Classification ── -->
+          <div class="sc-section-hdr" style="margin-top:16px">
+            <span class="sc-sec-num sc-sec-num--blue">1</span>
+            <span class="sc-sec-title">Syndrome Classification</span>
+            <span v-if="autoSyndromeApplied && caseDecision.syndrome_classification" class="sc-sec-badge sc-sec-badge--auto">Auto-set ✓</span>
+            <span v-else class="sc-sec-badge sc-sec-badge--req">Required</span>
+          </div>
+          <div v-if="autoSyndromeApplied" class="sc-auto-hint">
+            <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" style="width:10px;height:10px;flex-shrink:0"><circle cx="6" cy="6" r="4.5"/><polyline points="4 6 5.5 7.5 8 4.5"/></svg>
+            Syndrome auto-classified from symptoms. Tap another button to override.
+          </div>
+          <div v-if="fieldErrors.syndrome_classification" class="sc-field-err" role="alert">{{ fieldErrors.syndrome_classification }}</div>
+          <div class="sc-syndrome-grid">
+            <button
+              v-for="syn in SYNDROMES" :key="syn.code"
+              class="sc-syn-btn"
+              :class="{
+                'sc-syn-btn--active': caseDecision.syndrome_classification === syn.code,
+                'sc-syn-btn--danger': syn.danger,
+              }"
+              type="button"
+              @click="caseDecision.syndrome_classification = syn.code; autoSyndromeApplied = false"
+              :aria-pressed="caseDecision.syndrome_classification === syn.code"
+            >
+              <span class="sc-syn-code">{{ syn.code }}</span>
+              <span class="sc-syn-name">{{ syn.name }}</span>
+            </button>
+          </div>
+
+          <!-- ── Risk Level ── -->
+          <div class="sc-section-hdr" style="margin-top:16px">
+            <span class="sc-sec-num sc-sec-num--red">2</span>
+            <span class="sc-sec-title">Risk Level Assessment</span>
+            <span class="sc-sec-badge sc-sec-badge--req">Required</span>
+          </div>
+          <div v-if="fieldErrors.risk_level" class="sc-field-err" role="alert">{{ fieldErrors.risk_level }}</div>
+          <div class="sc-risk-row">
+            <button v-for="rl in RISK_LEVELS" :key="rl.value"
+              class="sc-risk-btn"
+              :class="['sc-risk-btn--' + rl.value.toLowerCase(), caseDecision.risk_level === rl.value && 'sc-risk-btn--active']"
+              type="button"
+              @click="caseDecision.risk_level = rl.value"
+              :aria-pressed="caseDecision.risk_level === rl.value"
+            >
+              <span class="sc-risk-lbl">{{ rl.label }}</span>
+              <span class="sc-risk-sub">{{ rl.sub }}</span>
+            </button>
+          </div>
+
+          <!-- ── Alert Preview (shows only when triggered) ── -->
+          <div v-if="alertPreview" class="sc-alert-preview" role="alert" aria-live="polite">
+            <div class="sc-ap-hdr">
+              <svg viewBox="0 0 16 16" fill="none" stroke="#fff" stroke-width="1.6" stroke-linecap="round"><path d="M8 1L1 14h14L8 1z"/><line x1="8" y1="5.5" x2="8" y2="9"/><circle cx="8" cy="11.5" r=".7" fill="#fff"/></svg>
+              <span class="sc-ap-title">Alert Auto-Triggered</span>
+              <span class="sc-ap-badge">IHR Rule-Based</span>
+            </div>
+            <div class="sc-ap-body">
+              <div class="sc-ap-row"><span class="sc-ap-k">Code</span><span class="sc-ap-v sc-ap-v--warn">{{ alertPreview.alertCode }}</span></div>
+              <div class="sc-ap-row"><span class="sc-ap-k">Risk Level</span><span class="sc-ap-v">{{ alertPreview.riskLevel }}</span></div>
+              <div class="sc-ap-row">
+                <span class="sc-ap-k">Route To</span>
+                <span class="sc-ap-v">
+                  <span class="sc-ap-target" :class="'sc-ap-target--' + alertPreview.routedTo.toLowerCase()">{{ alertPreview.routedTo }} ★</span>
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <!-- ── Actions Taken ── -->
+          <div class="sc-section-hdr" style="margin-top:16px">
+            <span class="sc-sec-num sc-sec-num--green">3</span>
+            <span class="sc-sec-title">Actions Taken</span>
+            <span class="sc-sec-badge sc-sec-badge--req">At least 1 required</span>
+          </div>
+          <div v-if="fieldErrors.actions" class="sc-field-err" role="alert">{{ fieldErrors.actions }}</div>
+          <div class="sc-actions-grid">
+            <button
+              v-for="ac in ACTIONS" :key="ac.code"
+              class="sc-action-btn"
+              :class="{ 'sc-action-btn--active': isActionDone(ac.code) }"
+              type="button"
+              :aria-pressed="isActionDone(ac.code)"
+              @click="toggleAction(ac.code)"
+            >
+              <span class="sc-action-ic" aria-hidden="true">
+                <svg v-if="isActionDone(ac.code)" viewBox="0 0 10 10" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round"><polyline points="1 5 4 8 9 2"/></svg>
+                <span v-else class="sc-action-dot" />
+              </span>
+              {{ ac.label }}
+            </button>
+          </div>
+
+          <!-- HIGH/CRITICAL enforcement -->
+          <div
+            v-if="(caseDecision.risk_level === 'HIGH' || caseDecision.risk_level === 'CRITICAL') && !highRiskActionDone"
+            class="sc-enforce-warn"
+            role="alert"
+          >
+            <svg viewBox="0 0 14 14" fill="none" stroke="#C62828" stroke-width="1.5" stroke-linecap="round"><path d="M7 1L1 12h12L7 1z"/><line x1="7" y1="5" x2="7" y2="8.5"/><circle cx="7" cy="10.5" r=".6" fill="#C62828"/></svg>
+            <span>Risk {{ caseDecision.risk_level }} requires <strong>ISOLATED</strong> or <strong>REFERRED_HOSPITAL</strong> action before disposition.</span>
+          </div>
+
+          <!-- ── Final Disposition ── -->
+          <div class="sc-section-hdr" style="margin-top:16px">
+            <span class="sc-sec-num sc-sec-num--green">4</span>
+            <span class="sc-sec-title">Final Disposition</span>
+            <span class="sc-sec-badge sc-sec-badge--req">Required</span>
+          </div>
+          <div v-if="fieldErrors.final_disposition" class="sc-field-err" role="alert">{{ fieldErrors.final_disposition }}</div>
+          <div class="sc-disp-grid">
+            <button
+              v-for="dp in DISPOSITIONS" :key="dp.value"
+              class="sc-disp-btn"
+              :class="{ 'sc-disp-btn--active': caseDecision.final_disposition === dp.value }"
+              type="button"
+              :aria-pressed="caseDecision.final_disposition === dp.value"
+              @click="caseDecision.final_disposition = dp.value"
+            >
+              <span class="sc-disp-ic" v-html="dp.icon" aria-hidden="true" />
+              <span class="sc-disp-lbl">{{ dp.label }}</span>
+            </button>
+          </div>
+
+          <!-- ── Officer Notes ── -->
+          <div class="sc-section-hdr" style="margin-top:16px">
+            <span class="sc-sec-num sc-sec-num--blue">5</span>
+            <span class="sc-sec-title">Officer Notes</span>
+            <span class="sc-sec-badge sc-sec-badge--opt">Optional</span>
+          </div>
+          <div class="sc-notes-wrap">
+            <textarea
+              class="sc-notes-input"
+              rows="4"
+              maxlength="5000"
+              placeholder="Clinical observations, context, differential reasoning…"
+              v-model="caseDecision.officer_notes"
+              aria-label="Officer notes"
+            />
+          </div>
+
+          <!-- ── Follow-up ── -->
+          <div class="sc-followup-row">
+            <button
+              class="sc-followup-toggle"
+              :class="{ 'sc-followup-toggle--on': caseDecision.followup_required }"
+              type="button"
+              @click="caseDecision.followup_required = !caseDecision.followup_required"
+              :aria-pressed="caseDecision.followup_required"
+            >
+              <span class="sc-ft-indicator" aria-hidden="true" />
+              <span class="sc-ft-lbl">Follow-up Required</span>
+            </button>
+            <select
+              v-if="caseDecision.followup_required"
+              class="sc-followup-level"
+              v-model="caseDecision.followup_assigned_level"
+              aria-label="Follow-up level"
+            >
+              <option value="">— Assign level —</option>
+              <option value="POE">POE</option>
+              <option value="DISTRICT">District</option>
+              <option value="PHEOC">PHEOC</option>
+              <option value="NATIONAL">National</option>
+            </select>
+          </div>
+
+          <!-- Suspected diseases (read-only review) -->
+          <div v-if="suspectedDiseases.length > 0" class="sc-section-hdr" style="margin-top:16px">
+            <span class="sc-sec-num sc-sec-num--purple">6</span>
+            <span class="sc-sec-title">Suspected Diseases (to be saved)</span>
+            <span class="sc-sec-badge sc-sec-badge--opt">Auto-populated</span>
+          </div>
+          <div v-if="suspectedDiseases.length > 0" class="sc-sus-list">
+            <div v-for="sd in suspectedDiseases" :key="sd.disease_code" class="sc-sus-row">
+              <span class="sc-sus-rank">{{ sd.rank_order }}</span>
+              <span class="sc-sus-name">{{ sd.disease_code.replace(/_/g,' ') }}</span>
+              <span v-if="sd.confidence" class="sc-sus-conf">{{ sd.confidence }}%</span>
+            </div>
+          </div>
+
+          <div style="height:8px"/>
+        </div>
+        <!-- /STEP 4 -->
+
+        <!-- ════════════════════════════════════════════════════
+             NOTIFICATION STATE VERIFICATION PANEL
+             Always visible in step 4. Shows IDB + server state.
+        ════════════════════════════════════════════════════ -->
+        <div v-if="isAdmin && debugPanelOpen && step === 4" class="sc-verify-panel">
+          <div class="sc-verify-header">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" style="width:14px;height:14px;flex-shrink:0">
+              <circle cx="8" cy="8" r="6"/><polyline points="5 8 7.5 10.5 11 6"/>
+            </svg>
+            <span class="sc-verify-title">Notification &amp; Sync Integrity Test</span>
+            <button class="sc-verify-btn sc-verify-btn--sync" :disabled="syncStatus.running" @click.prevent="syncCaseToServer(getAuth())">
+              {{ syncStatus.running ? '⏳ Syncing…' : '⬆ Force Sync' }}
+            </button>
+            <button class="sc-verify-btn" :disabled="notifVerify.running" @click.prevent="verifyNotificationState">
+              {{ notifVerify.running ? 'Checking…' : notifVerify.ran ? 'Re-verify' : 'Run Test' }}
+            </button>
+          </div>
+
+          <!-- Sync result rows -->
+          <div v-if="syncStatus.lastRunAt" class="sc-sync-result-block">
+            <div class="sc-srb-title">Last sync attempt: {{ syncStatus.lastRunAt }}</div>
+            <div class="sc-srb-row" :class="'sc-srb-row--' + (syncStatus.phase1 ?? 'pending')">
+              <span class="sc-srb-phase">Phase 1 — Create</span>
+              <span class="sc-srb-status">{{ syncStatus.phase1 ?? '—' }}</span>
+              <span class="sc-srb-msg">{{ syncStatus.phase1Msg }}</span>
+            </div>
+            <div class="sc-srb-row" :class="'sc-srb-row--' + (syncStatus.phase2 ?? 'pending')">
+              <span class="sc-srb-phase">Phase 2 — FullSync</span>
+              <span class="sc-srb-status">{{ syncStatus.phase2 ?? '—' }}</span>
+              <span class="sc-srb-msg">{{ syncStatus.phase2Msg }}</span>
+            </div>
+            <div v-if="syncStatus.error" class="sc-srb-error">⚠ {{ syncStatus.error }}</div>
+            <details v-if="syncStatus.phase1Resp" class="sc-verify-raw">
+              <summary>Phase 1 server response</summary>
+              <pre>{{ JSON.stringify(syncStatus.phase1Resp, null, 2) }}</pre>
+            </details>
+            <details v-if="syncStatus.phase2Resp" class="sc-verify-raw">
+              <summary>Phase 2 server response</summary>
+              <pre>{{ JSON.stringify(syncStatus.phase2Resp, null, 2) }}</pre>
+            </details>
+            <details v-if="syncStatus.phase1Payload" class="sc-verify-raw">
+              <summary>Phase 1 payload sent</summary>
+              <pre>{{ JSON.stringify(syncStatus.phase1Payload, null, 2) }}</pre>
+            </details>
+          </div>
+
+          <!-- Not yet run -->
+          <div v-if="!notifVerify.ran && !notifVerify.running && !notifVerify.error" class="sc-verify-idle">
+            Tap "Run Test" to verify notification and sync state end-to-end.
+          </div>
+
+          <!-- Error -->
+          <div v-if="notifVerify.error" class="sc-verify-error">⚠ {{ notifVerify.error }}</div>
+
+          <!-- Results -->
+          <div v-if="notifVerify.ran" class="sc-verify-results">
+            <div
+              v-for="(chk, i) in notifVerify.checks"
+              :key="i"
+              class="sc-verify-row"
+              :class="chk.pass ? 'sc-verify-row--pass' : 'sc-verify-row--fail'"
+            >
+              <span class="sc-verify-icon">{{ chk.pass ? '✓' : '✖' }}</span>
+              <div class="sc-verify-body">
+                <div class="sc-verify-label">{{ chk.label }}</div>
+                <div class="sc-verify-detail">{{ chk.detail }}</div>
+              </div>
+            </div>
+
+            <!-- Summary -->
+            <div class="sc-verify-summary" :class="notifVerify.checks.every(c=>c.pass) ? 'sc-verify-summary--ok' : 'sc-verify-summary--warn'">
+              {{ notifVerify.checks.filter(c=>c.pass).length }} / {{ notifVerify.checks.length }} checks passed
+              <template v-if="!notifVerify.checks.every(c=>c.pass)">
+              — {{ isOnline ? 'Tap Re-verify after saving or syncing' : 'Device is offline — IDB checks only' }}
+              </template>
+            </div>
+
+            <!-- IDB raw dump -->
+            <details class="sc-verify-raw" v-if="notifVerify.idb">
+              <summary>IDB raw notification record</summary>
+              <pre>{{ JSON.stringify(notifVerify.idb, null, 2) }}</pre>
+            </details>
+            <details class="sc-verify-raw" v-if="notifVerify.server">
+              <summary>Server raw notification record</summary>
+              <pre>{{ JSON.stringify(notifVerify.server, null, 2) }}</pre>
+            </details>
+          </div>
+        </div>
+
+      </div>
+      <!-- /wizard body -->
+
+    </IonContent>
+
+    <!-- ══════════════════════════════════════════════════════════════════
+         FOOTER — Navigation buttons
+    ══════════════════════════════════════════════════════════════════ -->
+    <IonFooter v-if="!loading && !notFound" class="sc-footer">
+      <div class="sc-footer-inner">
+        <!-- Back button (steps 2-4) -->
+        <button
+          v-if="step > 1"
+          class="sc-nav-btn sc-nav-btn--back"
+          type="button"
+          @click="goBackStep"
+          :disabled="saving"
+        >
+          <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="9 3 5 7 9 11"/></svg>
+          Back
+        </button>
+        <div v-else class="sc-nav-spacer" />
+
+        <!-- Step 1 → 2 -->
+        <button
+          v-if="step === 1"
+          class="sc-nav-btn sc-nav-btn--next"
+          type="button"
+          @click="saveStep1AndNext"
+          :disabled="saving"
+        >
+          {{ saving ? 'Saving…' : 'Next' }}
+          <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="5 3 9 7 5 11"/></svg>
+        </button>
+
+        <!-- Step 2 → 3 -->
+        <button
+          v-if="step === 2"
+          class="sc-nav-btn sc-nav-btn--next"
+          type="button"
+          @click="saveStep2AndNext"
+          :disabled="saving"
+        >
+          {{ saving ? 'Saving…' : 'Next' }}
+          <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="5 3 9 7 5 11"/></svg>
+        </button>
+
+        <!-- Step 3 → 4 (triggers analysis) -->
+        <button
+          v-if="step === 3"
+          class="sc-nav-btn sc-nav-btn--analyse"
+          type="button"
+          @click="saveStep3AndAnalyse"
+          :disabled="saving"
+        >
+          {{ saving ? 'Analysing…' : 'Analyse →' }}
+        </button>
+
+        <!-- Step 4 — Disposition -->
+        <button
+          v-if="step === 4"
+          class="sc-nav-btn sc-nav-btn--disposition"
+          type="button"
+          @click="dispositionCase"
+          :disabled="saving || !canDisposition"
+        >
+          {{ saving ? 'Saving…' : 'Save & Disposition' }}
+        </button>
+      </div>
+    </IonFooter>
+
+  </IonPage>
+</template>
+
+
+<script setup>
+// ═══════════════════════════════════════════════════════════════════════════
+// SecondaryScreening.vue
+// Route:  /secondary-screening/:notificationUuid
+// Roles:  POE_SECONDARY, POE_ADMIN
+// Law:    poeDB.js is the ONLY data layer. No Dexie instantiation here.
+//         API has NO auth middleware — NO Authorization header ever.
+//         Navigate back using server integer id where applicable.
+// ═══════════════════════════════════════════════════════════════════════════
+
+import { ref, computed, reactive, watch, nextTick, onMounted, toRaw } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import {
+  IonPage, IonHeader, IonContent, IonFooter,
+  onIonViewDidEnter,
+} from '@ionic/vue'
+
+import {
+  dbPut, dbGet, safeDbPut,
+  dbGetByIndex, dbReplaceAll, dbAtomicWrite,
+  genUUID, isoNow, createRecordBase,
+  STORE, SYNC, APP,
+} from '@/services/poeDB'
+
+// ─── IDB SERIALISATION HELPER ────────────────────────────────────────────
+// IDB uses the structured clone algorithm which CANNOT clone Vue Proxy objects.
+// Any value that came from ref(), reactive(), or computed() must be stripped
+// of its Proxy wrapper before being passed to dbPut / dbReplaceAll / dbAtomicWrite.
+// toPlain() handles this in ONE operation: toRaw strips the outer proxy,
+// JSON round-trip deep-clones nested reactive objects into plain JS values.
+// ALWAYS wrap every record or array passed to an IDB write with toPlain().
+function toPlain(val) {
+  return JSON.parse(JSON.stringify(toRaw(val)))
+}
+const route  = useRoute()
+const router = useRouter()
+
+// notificationUuid — the IDB primary key (client_uuid) of the notification.
+// Read fresh inside _doInitPage(), never captured at setup scope.
+const notificationUuid = ref('')
+
+// ─── AUTH ─────────────────────────────────────────────────────────────────
+// Auth is read fresh inside every write handler — NEVER cached at module level
+function getAuth() {
+  return JSON.parse(sessionStorage.getItem('AUTH_DATA') ?? 'null') ?? {}
+}
+
+const auth = reactive(getAuth())
+
+
+
+// ─── STATE ────────────────────────────────────────────────────────────────
+const loading        = ref(true)
+const notFound       = ref(false)
+const poeMismatch    = ref(false)   // user's POE does not match the notification's POE
+const saving         = ref(false)
+const step           = ref(1)
+
+const notification      = ref(null)   // notifications record (IDB)
+const primaryScreening  = ref(null)   // primary_screenings record (IDB)
+const caseRecord        = ref(null)   // secondary_screenings record (IDB)
+const caseUuid          = ref(null)   // client_uuid of the secondary case
+
+// ─── STEP 1: PROFILE & TRAVEL ─────────────────────────────────────────────
+const profile = reactive({
+  traveler_full_name:                '',
+  traveler_gender:                   '',
+  traveler_age_years:                null,
+  travel_document_type:              '',
+  travel_document_number:            '',
+  traveler_nationality_country_code: '',
+  residence_country_code:            '',
+  phone_number:                      '',
+  journey_start_country_code:        '',
+  conveyance_type:                   '',
+  conveyance_identifier:             '',
+  arrival_datetime_input:            '',   // datetime-local input → converted on save
+  purpose_of_travel:                 '',
+  destination_district_code:         '',
+})
+
+const travelCountries = ref([])  // array of { client_uuid, country_code, travel_role, arrival_date, departure_date }
+
+// ─── STEP 2: SYMPTOMS ─────────────────────────────────────────────────────
+// Full symptom inventory — all toggled YES/NO
+// Initialised in initSymptoms() from SYMPTOM_GROUPS
+const symptomsMap = reactive({})  // code → { symptom_code, is_present, onset_date, details }
+
+const showVitals = ref(false)
+
+const vitals = reactive({
+  temperature_value:      null,
+  temperature_unit:       'C',
+  pulse_rate:             null,
+  respiratory_rate:       null,
+  bp_systolic:            null,
+  bp_diastolic:           null,
+  oxygen_saturation:      null,
+  triage_category:        '',
+  emergency_signs_present: 0,
+  general_appearance:     '',
+  syndrome_classification: '',
+})
+
+// ─── STEP 3: EXPOSURES ────────────────────────────────────────────────────
+// Exactly 5 structured exposure questions (DB SOT: secondary_exposures table)
+const exposures = reactive([
+  {
+    db_code:    'SICK_PERSON_CONTACT',
+    engine_code: 'contact_body_fluids',
+    question:  'Exposed to blood or body fluids of a symptomatic person?',
+    response:  'UNKNOWN',
+  },
+  {
+    db_code:    'KNOWN_CASE_CONTACT',
+    engine_code: 'close_contact_case',
+    question:  'Provided direct care to a person with epidemic-prone illness?',
+    response:  'UNKNOWN',
+  },
+  {
+    db_code:    'FUNERAL_BURIAL',
+    engine_code: 'contact_dead_body',
+    question:  'Handled dead bodies of persons with epidemic-prone illness?',
+    response:  'UNKNOWN',
+  },
+  {
+    db_code:    'LAB_EXPOSURE',
+    engine_code: 'healthcare_exposure',
+    question:  'Worked in a laboratory handling infectious materials?',
+    response:  'UNKNOWN',
+  },
+  {
+    db_code:    'MASS_GATHERING',
+    engine_code: 'funeral_or_burial_exposure',
+    question:  'Attended a funeral or burial ceremony in a risk area?',
+    response:  'UNKNOWN',
+  },
+])
+
+// ─── STEP 4: ANALYSIS & DISPOSITION ──────────────────────────────────────
+const analysisResult   = ref(null)  // result from window.DISEASES.scoreDiseases()
+const suspectedDiseases = ref([])   // built from top_diagnoses → secondary_suspected_diseases rows
+
+const caseDecision = reactive({
+  syndrome_classification:   '',
+  risk_level:                '',
+  final_disposition:         '',
+  officer_notes:             '',
+  followup_required:         false,
+  followup_assigned_level:   '',
+})
+
+const actions = ref([])  // array of { client_uuid, secondary_screening_id, action_code, is_done, details }
+
+const fieldErrors = reactive({
+  syndrome_classification: '',
+  risk_level:              '',
+  final_disposition:       '',
+  actions:                 '',
+})
+
+// ─── REFERENCE DATA ───────────────────────────────────────────────────────
+const COUNTRY_LIST = computed(() => {
+  try {
+    const raw = window.COUNTRIES?.[0] ?? window.COUNTRIES ?? []
+    return raw.map(c => ({ code2: c.code2, name: c.name }))
+              .sort((a, b) => a.name.localeCompare(b.name))
+  } catch {
+    return []
+  }
+})
+
+const STEPS = [
+  { key: 'profile',   label: 'Profile' },
+  { key: 'symptoms',  label: 'Symptoms' },
+  { key: 'exposure',  label: 'Exposures' },
+  { key: 'analysis',  label: 'Analysis' },
+]
+
+const GENDERS = [
+  { value: 'MALE',    label: 'Male' },
+  { value: 'FEMALE',  label: 'Female' },
+  { value: 'OTHER',   label: 'Other' },
+  { value: 'UNKNOWN', label: 'Unknown' },
+]
+
+const DOC_TYPES = [
+  { value: 'PASSPORT',       label: 'Passport' },
+  { value: 'NATIONAL_ID',    label: 'National ID' },
+  { value: 'LAISSEZ_PASSER', label: 'Laissez-Passer' },
+  { value: 'OTHER',          label: 'Other' },
+]
+
+const CONVEYANCE_TYPES = [
+  { value: 'LAND', label: 'Land' },
+  { value: 'AIR',  label: 'Air' },
+  { value: 'SEA',  label: 'Sea' },
+  { value: 'OTHER', label: 'Other' },
+]
+
+const TRIAGE_CATS = [
+  { value: 'NON_URGENT', label: 'Non-Urgent', sub: 'Stable' },
+  { value: 'URGENT',     label: 'Urgent',     sub: 'Needs care' },
+  { value: 'EMERGENCY',  label: 'Emergency',  sub: 'Immediate' },
+]
+
+// Syndrome codes — must match DB ENUM values exactly
+const SYNDROMES = [
+  { code: 'ILI',              name: 'Influenza-Like Illness', danger: false },
+  { code: 'SARI',             name: 'Severe Acute Resp.',     danger: false },
+  { code: 'AWD',              name: 'Acute Watery Diarr.',    danger: false },
+  { code: 'BLOODY_DIARRHEA',  name: 'Bloody Diarrhoea',       danger: false },
+  { code: 'VHF',              name: 'Viral Haem. Fever',      danger: true  },
+  { code: 'RASH_FEVER',       name: 'Febrile Rash',           danger: false },
+  { code: 'JAUNDICE',         name: 'Jaundice Syndrome',      danger: false },
+  { code: 'NEUROLOGICAL',     name: 'Neurological Synd.',     danger: true  },
+  { code: 'MENINGITIS',       name: 'Meningitis Syndrome',    danger: true  },
+  { code: 'OTHER',            name: 'Other Syndrome',         danger: false },
+  { code: 'NONE',             name: 'No Syndrome (FP)',       danger: false },
+]
+
+const RISK_LEVELS = [
+  { value: 'LOW',      label: 'Low',      sub: 'Monitor' },
+  { value: 'MEDIUM',   label: 'Medium',   sub: 'Investigate' },
+  { value: 'HIGH',     label: 'High',     sub: 'Isolate' },
+  { value: 'CRITICAL', label: 'Critical', sub: 'Emergency' },
+]
+
+const DISPOSITIONS = [
+  { value: 'RELEASED',         label: 'Released',         icon: '<svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><polyline points="2 7 5.5 10.5 12 4"/></svg>' },
+  { value: 'DELAYED',          label: 'Delayed',          icon: '<svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="7" cy="7" r="5"/><polyline points="7 4 7 7 9 9"/></svg>' },
+  { value: 'QUARANTINED',      label: 'Quarantined',      icon: '<svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="2" y="2" width="10" height="10" rx="2"/><line x1="7" y1="2" x2="7" y2="12"/><line x1="2" y1="7" x2="12" y2="7"/></svg>' },
+  { value: 'ISOLATED',         label: 'Isolated',         icon: '<svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="7" cy="7" r="5"/><line x1="7" y1="4" x2="7" y2="10"/></svg>' },
+  { value: 'REFERRED',         label: 'Referred',         icon: '<svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M1 7h10M7 3l4 4-4 4"/></svg>' },
+  { value: 'TRANSFERRED',      label: 'Transferred',      icon: '<svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M1 4h12M1 10h12M8 1l3 3-3 3M6 7l-3 3 3 3"/></svg>' },
+  { value: 'DENIED_BOARDING',  label: 'Denied Entry',     icon: '<svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="7" cy="7" r="5"/><line x1="4" y1="4" x2="10" y2="10"/></svg>' },
+  { value: 'OTHER',            label: 'Other',            icon: '<svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="7" cy="7" r="1"/><circle cx="3" cy="7" r="1"/><circle cx="11" cy="7" r="1"/></svg>' },
+]
+
+const ACTIONS = [
+  { code: 'ISOLATED',                   label: 'Isolated' },
+  { code: 'MASK_GIVEN',                 label: 'Mask Given' },
+  { code: 'PPE_USED',                   label: 'PPE Used' },
+  { code: 'SEPARATE_INTERVIEW_ROOM',    label: 'Separate Room' },
+  { code: 'REFERRED_CLINIC',            label: 'Referred — Clinic' },
+  { code: 'REFERRED_HOSPITAL',          label: 'Referred — Hospital' },
+  { code: 'QUARANTINE_RECOMMENDED',     label: 'Quarantine Rec.' },
+  { code: 'SAMPLE_COLLECTED',           label: 'Sample Collected' },
+  { code: 'ALLOWED_CONTINUE',           label: 'Allowed to Continue' },
+  { code: 'CONTACT_TRACING_INITIATED',  label: 'Contact Tracing' },
+  { code: 'ALERT_ISSUED',               label: 'Alert Issued' },
+  { code: 'FOLLOWUP_SCHEDULED',         label: 'Follow-up Scheduled' },
+]
+
+// Symptom groups for Step 2 UI — codes must match Diseases.js symptom IDs
+const SYMPTOM_GROUPS = [
+  {
+    key: 'fever_systemic', label: 'Fever & Systemic', color: '#C62828',
+    symptoms: [
+      { code: 'fever',               label: 'Fever',                requiresOnset: true  },
+      { code: 'high_fever',          label: 'High Fever (≥39°C)',    requiresOnset: true  },
+      { code: 'sudden_onset_fever',  label: 'Sudden-onset Fever',    requiresOnset: true  },
+      { code: 'low_grade_fever',     label: 'Low-grade Fever',       requiresOnset: true  },
+      { code: 'chills',              label: 'Chills / Rigors',       requiresOnset: false },
+      { code: 'fatigue',             label: 'Fatigue',               requiresOnset: false },
+      { code: 'severe_fatigue',      label: 'Severe Fatigue',        requiresOnset: false },
+      { code: 'weakness',            label: 'Weakness / Malaise',    requiresOnset: false },
+    ],
+  },
+  {
+    key: 'respiratory', label: 'Respiratory', color: '#1565C0',
+    symptoms: [
+      { code: 'cough',               label: 'Cough',                 requiresOnset: true  },
+      { code: 'dry_cough',           label: 'Dry Cough',             requiresOnset: true  },
+      { code: 'shortness_of_breath', label: 'Shortness of Breath',   requiresOnset: false },
+      { code: 'difficulty_breathing',label: 'Difficulty Breathing',  requiresOnset: false },
+      { code: 'sore_throat',         label: 'Sore Throat',           requiresOnset: false },
+      { code: 'coryza',              label: 'Runny Nose / Coryza',   requiresOnset: false },
+    ],
+  },
+  {
+    key: 'gastrointestinal', label: 'Gastrointestinal', color: '#E65100',
+    symptoms: [
+      { code: 'nausea',              label: 'Nausea',                requiresOnset: false },
+      { code: 'vomiting',            label: 'Vomiting',              requiresOnset: true  },
+      { code: 'diarrhea',            label: 'Diarrhoea (general)',   requiresOnset: true  },
+      { code: 'watery_diarrhea',     label: 'Profuse Watery Diarr.', requiresOnset: true  },
+      { code: 'rice_water_diarrhea', label: 'Rice-water Diarr.',     requiresOnset: true  },
+      { code: 'bloody_diarrhea',     label: 'Bloody Diarrhoea',      requiresOnset: true  },
+      { code: 'abdominal_pain',      label: 'Abdominal Pain',        requiresOnset: false },
+      { code: 'severe_dehydration',  label: 'Severe Dehydration',    requiresOnset: false },
+    ],
+  },
+  {
+    key: 'jaundice_hepatic', label: 'Jaundice & Hepatic', color: '#F9A825',
+    symptoms: [
+      { code: 'jaundice',            label: 'Jaundice (Yellow Eyes/Skin)', requiresOnset: false },
+      { code: 'dark_urine',          label: 'Dark / Tea-coloured Urine',   requiresOnset: false },
+      { code: 'anorexia',            label: 'Loss of Appetite',            requiresOnset: false },
+      { code: 'hepatomegaly',        label: 'Enlarged Liver',              requiresOnset: false },
+    ],
+  },
+  {
+    key: 'rash_skin', label: 'Rash & Skin', color: '#6A1B9A',
+    symptoms: [
+      { code: 'rash_maculopapular',      label: 'Maculopapular Rash',      requiresOnset: true  },
+      { code: 'rash_vesicular_pustular', label: 'Vesicular / Pustular Rash', requiresOnset: true  },
+      { code: 'rash_face_first',         label: 'Rash Starting on Face',   requiresOnset: true  },
+      { code: 'petechial_or_purpuric_rash', label: 'Petechial / Purpuric', requiresOnset: false },
+      { code: 'painful_rash',            label: 'Painful Rash',            requiresOnset: false },
+      { code: 'skin_eschar',             label: 'Skin Eschar (Black Sore)',  requiresOnset: false },
+      { code: 'mucosal_lesions',         label: 'Mouth / Mucosal Lesions',  requiresOnset: false },
+    ],
+  },
+  {
+    key: 'hemorrhagic', label: 'Haemorrhagic Signs', color: '#B71C1C',
+    symptoms: [
+      { code: 'bleeding',              label: 'Bleeding (general)',      requiresOnset: false },
+      { code: 'bleeding_gums_or_nose', label: 'Bleeding Gums / Nose',    requiresOnset: false },
+      { code: 'bloody_sputum',         label: 'Blood in Sputum / Cough', requiresOnset: false },
+    ],
+  },
+  {
+    key: 'neurological', label: 'Neurological', color: '#1B5E20',
+    symptoms: [
+      { code: 'headache',               label: 'Headache',                requiresOnset: false },
+      { code: 'stiff_neck',             label: 'Stiff Neck',              requiresOnset: false },
+      { code: 'altered_consciousness',  label: 'Altered Consciousness',   requiresOnset: false },
+      { code: 'paralysis_acute_flaccid',label: 'Sudden Paralysis (AFP)',  requiresOnset: false },
+      { code: 'seizures',               label: 'Seizures',                requiresOnset: false },
+      { code: 'hydrophobia',            label: 'Fear of Water',           requiresOnset: false },
+      { code: 'aerophobia',             label: 'Fear of Air',             requiresOnset: false },
+    ],
+  },
+  {
+    key: 'other', label: 'Other Signs', color: '#546E7A',
+    symptoms: [
+      { code: 'muscle_pain',             label: 'Muscle / Body Pain',      requiresOnset: false },
+      { code: 'joint_pain',              label: 'Joint Pain',              requiresOnset: false },
+      { code: 'severe_joint_pain',       label: 'Severe Joint Pain',       requiresOnset: false },
+      { code: 'swollen_lymph_nodes',     label: 'Swollen Lymph Nodes',     requiresOnset: false },
+      { code: 'retroauricular_lymph_nodes', label: 'Swollen Neck/Ear Nodes', requiresOnset: false },
+      { code: 'conjunctivitis',          label: 'Red Eyes / Conjunctivitis', requiresOnset: false },
+      { code: 'loss_of_taste_smell',     label: 'Loss of Taste / Smell',   requiresOnset: false },
+    ],
+  },
+]
+
+// ─── FLAG MESSAGES ────────────────────────────────────────────────────────
+const FLAG_MESSAGES = {
+  NEEDS_IMMEDIATE_ISOLATION:       '⚠ IMMEDIATE ISOLATION REQUIRED',
+  NEEDS_IHR_NOTIFICATION:          '⚠ IHR NOTIFICATION REQUIRED',
+  NEEDS_EMERGENCY_REFERRAL:        '⚠ EMERGENCY REFERRAL — DO NOT DELAY',
+  NEEDS_PUBLIC_HEALTH_NOTIFICATION: '⚠ PUBLIC HEALTH NOTIFICATION REQUIRED',
+  VHF_PROTOCOL_ACTIVATED:          '🔴 VHF PROTOCOL ACTIVATED — Full PPE & Isolation',
+  AFP_SURVEILLANCE_ACTIVATED:      '⚠ AFP SURVEILLANCE ACTIVATED — Stool specimens × 2',
+  CHOLERA_PROTOCOL_ACTIVATED:      '⚠ CHOLERA PROTOCOL — Aggressive rehydration',
+  RABIES_PROTOCOL_ACTIVATED:       '🔴 RABIES PROTOCOL — Emergency referral immediately',
+  BIOTERRORISM_PROTOCOL_ACTIVATED: '🔴 BIOTERRORISM PROTOCOL — Maximum isolation + WHO',
+  PREGNANCY_RISK_FLAG:             '⚠ PREGNANCY RISK — Immediate referral if pregnant',
+}
+
+// ─── COMPUTED ──────────────────────────────────────────────────────────────
+const todayDate = computed(() => new Date().toISOString().slice(0, 10))
+
+const priorityClass = computed(() => {
+  const p = notification.value?.priority
+  if (p === 'CRITICAL') return 'sc-prio-pill--critical'
+  if (p === 'HIGH')     return 'sc-prio-pill--high'
+  return 'sc-prio-pill--normal'
+})
+
+// Expose navigator.onLine to template
+const isOnline = computed(() => navigator.onLine)
+
+// Admin gate — only NATIONAL_ADMIN and POE_ADMIN can open the debug panel
+const isAdmin = computed(() => {
+  const role = getAuth()?.role_key ?? ''
+  return role === 'NATIONAL_ADMIN' || role === 'POE_ADMIN'
+})
+
+// Debug panel — hidden by default, unlocked by 5 rapid taps on the sync pill (admin only)
+const debugPanelOpen = ref(false)
+let _debugTapCount = 0
+let _debugTapTimer = null
+function _debugTap() {
+  _debugTapCount++
+  clearTimeout(_debugTapTimer)
+  _debugTapTimer = setTimeout(() => { _debugTapCount = 0 }, 2000)
+  if (_debugTapCount >= 5) {
+    _debugTapCount = 0
+    debugPanelOpen.value = !debugPanelOpen.value
+    L.info(`Admin debug panel ${debugPanelOpen.value ? 'OPENED' : 'CLOSED'}`)
+  }
+}
+
+// Track whether auto-syndrome was applied this session (for the "Auto" badge in UI)
+const autoSyndromeApplied = ref(false)
+
+const syncPillClass = computed(() => {
+  if (!caseRecord.value) return 'sc-sync-pill--offline'
+  return caseRecord.value.sync_status === SYNC.SYNCED ? 'sc-sync-pill--ok' : 'sc-sync-pill--pending'
+})
+const syncPillLabel = computed(() => {
+  if (!caseRecord.value) return 'New'
+  return SYNC.LABELS[caseRecord.value.sync_status] || caseRecord.value.sync_status
+})
+
+const presentSymptomCount = computed(() =>
+  Object.values(symptomsMap).filter(s => s.is_present === 1).length
+)
+
+const yesExposureCount = computed(() =>
+  exposures.filter(e => e.response === 'YES').length
+)
+
+const criticalFlags = computed(() => {
+  if (!analysisResult.value) return []
+  return analysisResult.value.global_flags.filter(f =>
+    ['VHF_PROTOCOL_ACTIVATED','AFP_SURVEILLANCE_ACTIVATED','CHOLERA_PROTOCOL_ACTIVATED',
+     'RABIES_PROTOCOL_ACTIVATED','BIOTERRORISM_PROTOCOL_ACTIVATED',
+     'NEEDS_IMMEDIATE_ISOLATION','NEEDS_IHR_NOTIFICATION','NEEDS_EMERGENCY_REFERRAL'].includes(f)
+  )
+})
+
+// Alert preview — computed reactively from risk_level + syndrome
+const alertPreview = computed(() => {
+  const rl  = caseDecision.risk_level
+  const syn = caseDecision.syndrome_classification
+  if (!rl) return null
+
+  const PRIORITY1 = [
+    'cholera','pneumonic_plague','bubonic_plague',
+    'ebola_virus_disease','marburg_virus_disease','lassa_fever',
+    'cchf','yellow_fever','mpox','smallpox','rift_valley_fever',
+  ]
+  const NATIONAL_DISEASES = [
+    'ebola_virus_disease','marburg_virus_disease','pneumonic_plague','smallpox',
+  ]
+
+  const topDisease  = suspectedDiseases.value[0]?.disease_code ?? null
+  const isPriority1 = PRIORITY1.includes(topDisease)
+  const isNational  = NATIONAL_DISEASES.includes(topDisease)
+
+  let triggered  = false
+  let alertCode  = ''
+  let routedTo   = 'DISTRICT'
+
+  if (rl === 'CRITICAL') {
+    triggered = true; alertCode = 'CRITICAL_RISK_CASE'; routedTo = 'PHEOC'
+  } else if (rl === 'HIGH' && (syn === 'VHF' || syn === 'MENINGITIS')) {
+    triggered = true; alertCode = 'HIGH_RISK_' + syn; routedTo = 'PHEOC'
+  } else if (isPriority1 && rl === 'HIGH') {
+    triggered = true; alertCode = 'PRIORITY1_' + (topDisease || '').toUpperCase(); routedTo = 'PHEOC'
+  } else if (rl === 'HIGH') {
+    triggered = true; alertCode = 'HIGH_RISK_' + (syn || 'CASE'); routedTo = 'DISTRICT'
+  }
+
+  if (isNational && triggered) routedTo = 'NATIONAL'
+  if (!triggered) return null
+
+  return { alertCode, routedTo, riskLevel: rl }
+})
+
+const highRiskActionDone = computed(() => {
+  const rl = caseDecision.risk_level
+  if (rl !== 'HIGH' && rl !== 'CRITICAL') return true
+  return isActionDone('ISOLATED') || isActionDone('REFERRED_HOSPITAL')
+})
+
+const canDisposition = computed(() =>
+  !!caseDecision.syndrome_classification &&
+  !!caseDecision.risk_level &&
+  !!caseDecision.final_disposition &&
+  actions.value.filter(a => a.is_done === 1).length > 0 &&
+  highRiskActionDone.value
+)
+
+// Vital sign warnings
+const tempWarning = computed(() => {
+  const v = vitals.temperature_value
+  const u = vitals.temperature_unit
+  if (v == null) return ''
+  const c = u === 'F' ? (v - 32) * 5 / 9 : v
+  if (c < 35)  return '❄ Hypothermia — verify reading'
+  if (c >= 40) return '🔴 Dangerous fever — consider EMERGENCY'
+  if (c >= 39) return '⚠ High fever — consider URGENT/EMERGENCY'
+  if (c >= 38) return '⚠ Fever'
+  if (c >= 37.5) return 'Low-grade fever — document'
+  return ''
+})
+const tempWarnClass = computed(() => {
+  const v = vitals.temperature_value
+  const u = vitals.temperature_unit
+  if (v == null) return ''
+  const c = u === 'F' ? (v - 32) * 5 / 9 : v
+  if (c >= 39 || c < 35) return 'sc-vt-warn--crit'
+  if (c >= 37.5) return 'sc-vt-warn--warn'
+  return ''
+})
+const pulseWarning = computed(() => {
+  const p = vitals.pulse_rate
+  if (!p) return ''
+  if (p < 40) return '🔴 Critically low — verify'
+  if (p >= 150) return '🔴 Severe tachycardia — EMERGENCY'
+  if (p >= 101) return '⚠ Tachycardia'
+  if (p < 60) return '⚠ Bradycardia'
+  return ''
+})
+const rrWarning = computed(() => {
+  const r = vitals.respiratory_rate
+  if (!r) return ''
+  if (r < 10) return '⚠ Abnormally low — verify'
+  if (r >= 30) return '🔴 Severe — consider EMERGENCY'
+  if (r >= 21) return '⚠ Elevated'
+  return ''
+})
+const spo2Warning = computed(() => {
+  const s = vitals.oxygen_saturation
+  if (!s) return ''
+  if (s < 90) return '🔴 Critically low SpO₂ — EMERGENCY'
+  if (s < 95) return '⚠ Low SpO₂ — supplemental oxygen recommended'
+  return ''
+})
+const spo2WarnClass = computed(() => {
+  const s = vitals.oxygen_saturation
+  if (!s) return ''
+  if (s < 90) return 'sc-vt-warn--crit'
+  if (s < 95) return 'sc-vt-warn--warn'
+  return ''
+})
+
+// ─── SYMPTOM HELPERS ──────────────────────────────────────────────────────
+function initSymptoms() {
+  for (const grp of SYMPTOM_GROUPS) {
+    for (const sym of grp.symptoms) {
+      if (!symptomsMap[sym.code]) {
+        symptomsMap[sym.code] = {
+          client_uuid:            genUUID(),
+          secondary_screening_id: caseUuid.value,
+          symptom_code:           sym.code,
+          is_present:             null,   // null = not yet assessed (stored as 0 on save)
+          onset_date:             null,
+          details:                null,
+          sync_status:            SYNC.UNSYNCED,
+        }
+      }
+    }
+  }
+}
+
+function symState(code) {
+  return symptomsMap[code]?.is_present ?? null
+}
+
+function toggleSymptom(code) {
+  if (!symptomsMap[code]) return
+  const current = symptomsMap[code].is_present
+  // null → 1 → 0 → null (cycle: unassessed → present → absent → unassessed)
+  if (current === null) symptomsMap[code].is_present = 1
+  else if (current === 1) symptomsMap[code].is_present = 0
+  else symptomsMap[code].is_present = null
+}
+
+function getSymptomRecord(code) {
+  return symptomsMap[code] || {}
+}
+
+function buildSymptomRecords() {
+  return Object.values(symptomsMap)
+    .filter(s => s.is_present !== null)
+    .map(s => ({
+      ...s,
+      secondary_screening_id: caseUuid.value,
+      sync_status:            SYNC.UNSYNCED,
+    }))
+}
+
+// ─── TRAVEL COUNTRIES HELPERS ─────────────────────────────────────────────
+function addTravelCountry() {
+  travelCountries.value.push({
+    client_uuid:            genUUID(),
+    secondary_screening_id: caseUuid.value,
+    country_code:           '',
+    travel_role:            'VISITED',
+    arrival_date:           null,
+    departure_date:         null,
+    sync_status:            SYNC.UNSYNCED,
+  })
+}
+
+function removeTravelCountry(idx) {
+  travelCountries.value.splice(idx, 1)
+}
+
+// ─── ACTIONS HELPERS ──────────────────────────────────────────────────────
+function isActionDone(code) {
+  return actions.value.some(a => a.action_code === code && a.is_done === 1)
+}
+
+function toggleAction(code) {
+  const idx = actions.value.findIndex(a => a.action_code === code)
+  if (idx === -1) {
+    actions.value.push({
+      client_uuid:            genUUID(),
+      secondary_screening_id: caseUuid.value,
+      action_code:            code,
+      is_done:                1,
+      details:                null,
+      sync_status:            SYNC.UNSYNCED,
+    })
+  } else {
+    actions.value[idx].is_done = actions.value[idx].is_done === 1 ? 0 : 1
+  }
+}
+
+// ─── GENDER LABEL ─────────────────────────────────────────────────────────
+function genderLabel(code) {
+  return { MALE: 'Male', FEMALE: 'Female', OTHER: 'Other', UNKNOWN: 'Unknown' }[code] || code || '—'
+}
+
+// ─── STEP NAVIGATION ──────────────────────────────────────────────────────
+function jumpToStep(target) {
+  // Only allow jumping to completed steps or current step
+  if (target <= step.value) step.value = target
+}
+
+async function goBackStep() {
+  if (step.value > 1) step.value--
+}
+
+function goBackToQueue() {
+  // Blur THEN navigate, deferred to the next event-loop turn.
+  // Root cause of the aria-hidden warning:
+  //   1. User taps back button
+  //   2. click fires → goBackToQueue runs → blur() called
+  //   3. BUT the browser's focus event for the tap fires AFTER click,
+  //      so blur() hit no focused element — the button focuses right after
+  //   4. router.back() fires → Ionic starts hiding the page
+  //   5. Ionic sets aria-hidden on the outgoing page while the button
+  //      still holds focus → accessibility violation logged
+  // Wrapping in setTimeout(0) defers past both the click and the focus event,
+  // so the button is focused THEN immediately blurred THEN the page leaves.
+  setTimeout(() => {
+    if (document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur()
+    }
+    router.back()
+  }, 0)
+}
+
+// ─── STEP 1 SAVE ──────────────────────────────────────────────────────────
+async function saveStep1AndNext() {
+  const localAuth = getAuth()
+  if (!localAuth?.id || !localAuth?.is_active) {
+    alert('Session expired. Please log in again.')
+    return
+  }
+
+  saving.value = true
+  try {
+    // Ensure case exists (create if first save)
+    if (!caseRecord.value) {
+      await openCase(localAuth)
+    }
+
+    // Build updated case record
+    const now     = isoNow()
+    const updated = {
+      ...caseRecord.value,
+      // Profile fields
+      traveler_full_name:                profile.traveler_full_name   || null,
+      traveler_gender:                   profile.traveler_gender      || 'UNKNOWN',
+      traveler_age_years:                profile.traveler_age_years   || null,
+      travel_document_type:              profile.travel_document_type || null,
+      travel_document_number:            profile.travel_document_number || null,
+      traveler_nationality_country_code: profile.traveler_nationality_country_code || null,
+      residence_country_code:            profile.residence_country_code || null,
+      phone_number:                      profile.phone_number         || null,
+      journey_start_country_code:        profile.journey_start_country_code || null,
+      conveyance_type:                   profile.conveyance_type      || null,
+      conveyance_identifier:             profile.conveyance_identifier || null,
+      arrival_datetime:                  profile.arrival_datetime_input
+                                           ? profile.arrival_datetime_input.replace('T', ' ') + ':00'
+                                           : null,
+      purpose_of_travel:                 profile.purpose_of_travel    || null,
+      destination_district_code:         profile.destination_district_code || null,
+      case_status:                       'IN_PROGRESS',
+      record_version:                    (caseRecord.value.record_version || 1) + 1,
+      updated_at:                        now,
+    }
+
+    // Travel countries: assign correct secondary_screening_id
+    const tcRecords = travelCountries.value
+      .filter(tc => tc.country_code)
+      .map(tc => ({
+        ...tc,
+        secondary_screening_id: caseUuid.value,
+        sync_status:            SYNC.UNSYNCED,
+      }))
+
+    // Write atomically: case update + travel countries replace-all
+    await safeDbPut(STORE.SECONDARY_SCREENINGS, toPlain(updated))
+    await dbReplaceAll(
+      STORE.SECONDARY_TRAVEL_COUNTRIES,
+      'secondary_screening_id',
+      caseUuid.value,
+      toPlain(tcRecords)
+    )
+
+    caseRecord.value = updated
+    step.value = 2
+    // Sync to server in background — IDB write already committed above
+    const localAuthStep1 = getAuth()
+    syncCaseToServer(localAuthStep1).catch(e => L.warn('saveStep1: syncCaseToServer threw', e?.message ?? e))
+  } catch (err) {
+    console.error('[SecondaryScreening] saveStep1AndNext error:', err)
+    alert('Failed to save. Please try again.')
+  } finally {
+    saving.value = false
+  }
+}
+
+// ─── STEP 2 SAVE ──────────────────────────────────────────────────────────
+async function saveStep2AndNext() {
+  const localAuth = getAuth()
+  if (!localAuth?.id || !localAuth?.is_active) {
+    alert('Session expired. Please log in again.')
+    return
+  }
+
+  saving.value = true
+  try {
+    const now     = isoNow()
+    const updated = {
+      ...caseRecord.value,
+      // Vitals (only if showVitals and values entered)
+      temperature_value:       showVitals.value ? vitals.temperature_value : caseRecord.value.temperature_value,
+      temperature_unit:        showVitals.value ? (vitals.temperature_value ? vitals.temperature_unit : null) : caseRecord.value.temperature_unit,
+      pulse_rate:              showVitals.value ? vitals.pulse_rate         : caseRecord.value.pulse_rate,
+      respiratory_rate:        showVitals.value ? vitals.respiratory_rate   : caseRecord.value.respiratory_rate,
+      bp_systolic:             showVitals.value ? vitals.bp_systolic        : caseRecord.value.bp_systolic,
+      bp_diastolic:            showVitals.value ? vitals.bp_diastolic       : caseRecord.value.bp_diastolic,
+      oxygen_saturation:       showVitals.value ? vitals.oxygen_saturation  : caseRecord.value.oxygen_saturation,
+      triage_category:         showVitals.value ? (vitals.triage_category || null) : caseRecord.value.triage_category,
+      emergency_signs_present: showVitals.value ? vitals.emergency_signs_present : caseRecord.value.emergency_signs_present,
+      general_appearance:      showVitals.value ? (vitals.general_appearance || null) : caseRecord.value.general_appearance,
+      case_status:             'IN_PROGRESS',
+      record_version:          (caseRecord.value.record_version || 1) + 1,
+      updated_at:              now,
+    }
+
+    // Symptom records for child table
+    const symptomRecords = buildSymptomRecords()
+
+    await safeDbPut(STORE.SECONDARY_SCREENINGS, toPlain(updated))
+    await dbReplaceAll(
+      STORE.SECONDARY_SYMPTOMS,
+      'secondary_screening_id',
+      caseUuid.value,
+      toPlain(symptomRecords)
+    )
+
+    caseRecord.value = updated
+    step.value = 3
+    // Sync to server in background — IDB write already committed above
+    const localAuthStep2 = getAuth()
+    syncCaseToServer(localAuthStep2).catch(e => L.warn('saveStep2: syncCaseToServer threw', e?.message ?? e))
+  } catch (err) {
+    console.error('[SecondaryScreening] saveStep2AndNext error:', err)
+    alert('Failed to save symptoms. Please try again.')
+  } finally {
+    saving.value = false
+  }
+}
+
+// ─── STEP 3 SAVE + ANALYSE ────────────────────────────────────────────────
+async function saveStep3AndAnalyse() {
+  const localAuth = getAuth()
+  if (!localAuth?.id || !localAuth?.is_active) {
+    alert('Session expired. Please log in again.')
+    return
+  }
+
+  saving.value = true
+  try {
+    // Build exposure records for secondary_exposures table
+    const exposureRecords = exposures.map(exp => ({
+      client_uuid:            genUUID(),
+      secondary_screening_id: caseUuid.value,
+      exposure_code:          exp.db_code,
+      response:               exp.response,
+      details:                null,
+      sync_status:            SYNC.UNSYNCED,
+    }))
+
+    // Save exposures to IDB
+    await dbReplaceAll(
+      STORE.SECONDARY_EXPOSURES,
+      'secondary_screening_id',
+      caseUuid.value,
+      toPlain(exposureRecords)
+    )
+
+    // ── Run the DISEASES scoring engine ──────────────────────────────────
+    // This is the ONLY place scoreDiseases() is called.
+    const presentSymptoms  = Object.values(symptomsMap).filter(s => s.is_present === 1).map(s => s.symptom_code)
+    const absentSymptoms   = Object.values(symptomsMap).filter(s => s.is_present === 0).map(s => s.symptom_code)
+
+    // Map DB exposure codes → engine exposure IDs (only YES responses)
+    const engineExposures = []
+    for (const exp of exposures) {
+      if (exp.response === 'YES') engineExposures.push(exp.engine_code)
+    }
+    // De-duplicate
+    const uniqueEngineExposures = [...new Set(engineExposures)]
+
+    const clinCtx = {}
+    if (vitals.temperature_value != null) {
+      clinCtx.temperature_c = vitals.temperature_unit === 'F'
+        ? (vitals.temperature_value - 32) * 5 / 9
+        : vitals.temperature_value
+    }
+
+    let result = null
+    try {
+      if (window.DISEASES && typeof window.DISEASES.scoreDiseases === 'function') {
+        result = window.DISEASES.scoreDiseases(
+          presentSymptoms,
+          absentSymptoms,
+          uniqueEngineExposures,
+          { clinical_context: clinCtx }
+        )
+      }
+    } catch (scoreErr) {
+      console.warn('[SecondaryScreening] scoreDiseases error:', scoreErr)
+      result = { top_diagnoses: [], all_reportable: [], global_flags: [], overrides_fired: [], input_summary: {} }
+    }
+
+    analysisResult.value = result
+
+    // ── AUTO-SYNDROME CLASSIFICATION ────────────────────────────────────────
+    // Derived from symptom pattern first, then overridden by top disease if the
+    // engine gives a confident Priority-1 result. Officer can still edit in Step 4.
+    const autoSyndrome = deriveAutoSyndrome(presentSymptoms)
+    if (!caseDecision.syndrome_classification) {
+      // Only auto-set if officer hasn't already chosen one (re-entry scenario)
+      caseDecision.syndrome_classification = autoSyndrome
+      autoSyndromeApplied.value = true
+      L.ok(`Auto-syndrome set to "${autoSyndrome}" from ${presentSymptoms.length} present symptoms`)
+    } else {
+      L.info(`Auto-syndrome would be "${autoSyndrome}" — officer already selected "${caseDecision.syndrome_classification}", not overriding`)
+    }
+
+    // Build suspected disease records from top 5
+    if (result && result.top_diagnoses.length > 0) {
+      suspectedDiseases.value = result.top_diagnoses.slice(0, 5).map((d, i) => ({
+        client_uuid:            genUUID(),
+        secondary_screening_id: caseUuid.value,
+        disease_code:           d.disease_id,
+        rank_order:             i + 1,
+        confidence:             d.probability_like_percent ?? null,
+        reasoning:              (d.matched_hallmarks || []).slice(0, 3).join(', ') || null,
+        sync_status:            SYNC.UNSYNCED,
+      }))
+    }
+
+    step.value = 4
+    // Sync exposures + current case to server in background
+    const localAuthStep3 = getAuth()
+    syncCaseToServer(localAuthStep3).catch(e => L.warn('saveStep3: syncCaseToServer threw', e?.message ?? e))
+  } catch (err) {
+    console.error('[SecondaryScreening] saveStep3AndAnalyse error:', err)
+    alert('Failed to save exposures. Please try again.')
+  } finally {
+    saving.value = false
+  }
+}
+
+// ─── STEP 4 DISPOSITION ───────────────────────────────────────────────────
+async function dispositionCase() {
+  const localAuth = getAuth()
+  if (!localAuth?.id || !localAuth?.is_active) {
+    alert('Session expired. Please log in again.')
+    return
+  }
+
+  // Clear previous errors
+  fieldErrors.syndrome_classification = ''
+  fieldErrors.risk_level              = ''
+  fieldErrors.final_disposition       = ''
+  fieldErrors.actions                 = ''
+
+  // Validate
+  let valid = true
+  if (!caseDecision.syndrome_classification) {
+    fieldErrors.syndrome_classification = 'Syndrome classification is required.'
+    valid = false
+  }
+  if (!caseDecision.risk_level) {
+    fieldErrors.risk_level = 'Risk level is required.'
+    valid = false
+  }
+  if (!caseDecision.final_disposition) {
+    fieldErrors.final_disposition = 'Final disposition is required.'
+    valid = false
+  }
+  if (actions.value.filter(a => a.is_done === 1).length === 0) {
+    fieldErrors.actions = 'At least one action must be recorded.'
+    valid = false
+  }
+  if (!highRiskActionDone.value) {
+    fieldErrors.actions = 'Risk level HIGH/CRITICAL requires ISOLATED or REFERRED_HOSPITAL action.'
+    valid = false
+  }
+  if (!valid) return
+
+  saving.value = true
+  try {
+    const now         = isoNow()
+    const doneActions = actions.value.filter(a => a.is_done === 1)
+
+    // Determine final case status:
+    //   CLOSED       — no follow-up required. Server closes notification atomically.
+    //   DISPOSITIONED — follow-up required. Supervisor closes it separately.
+    // The server's fullSync only runs the notification→CLOSED transition when
+    // case_status = 'CLOSED'. Sending 'DISPOSITIONED' leaves notification IN_PROGRESS.
+    const needsFollowup   = !!caseDecision.followup_required
+    const finalCaseStatus = needsFollowup ? 'DISPOSITIONED' : 'CLOSED'
+
+    const updatedCase = {
+      ...caseRecord.value,
+      syndrome_classification:  caseDecision.syndrome_classification,
+      risk_level:               caseDecision.risk_level,
+      final_disposition:        caseDecision.final_disposition,
+      officer_notes:            caseDecision.officer_notes || null,
+      followup_required:        needsFollowup ? 1 : 0,
+      followup_assigned_level:  needsFollowup ? (caseDecision.followup_assigned_level || null) : null,
+      case_status:              finalCaseStatus,
+      dispositioned_at:         now,
+      closed_at:                needsFollowup ? null : now,
+      record_version:           (caseRecord.value.record_version || 1) + 1,
+      updated_at:               now,
+    }
+
+    // Update notification in IDB:
+    //   No follow-up → CLOSED  (server also closes it atomically via fullSync)
+    //   Follow-up    → stays IN_PROGRESS until supervisor closes it
+    const updatedNotif = {
+      ...notification.value,
+      status:         needsFollowup ? notification.value.status : 'CLOSED',
+      closed_at:      needsFollowup ? null : now,
+      record_version: (notification.value.record_version || 1) + 1,
+      updated_at:     now,
+    }
+
+    // All writes: case + actions + suspected diseases + notification
+    await safeDbPut(STORE.SECONDARY_SCREENINGS, toPlain(updatedCase))
+
+    await dbReplaceAll(
+      STORE.SECONDARY_ACTIONS,
+      'secondary_screening_id',
+      caseUuid.value,
+      toPlain(doneActions.map(a => ({ ...a, secondary_screening_id: caseUuid.value })))
+    )
+
+    await dbReplaceAll(
+      STORE.SECONDARY_SUSPECTED_DISEASES,
+      'secondary_screening_id',
+      caseUuid.value,
+      toPlain(suspectedDiseases.value)
+    )
+
+    // If alert is triggered, create alert record
+    if (alertPreview.value) {
+      const alertRecord = createRecordBase(localAuth, {
+        secondary_screening_id:    caseUuid.value,
+        generated_from:            'RULE_BASED',
+        risk_level:                caseDecision.risk_level,
+        alert_code:                alertPreview.value.alertCode,
+        alert_title:               alertPreview.value.alertCode.replace(/_/g, ' '),
+        alert_details:             caseDecision.officer_notes || null,
+        routed_to_level:           alertPreview.value.routedTo,
+        status:                    'OPEN',
+        acknowledged_by_user_id:   null,
+        acknowledged_at:           null,
+        closed_at:                 null,
+      })
+      await dbPut(STORE.ALERTS, toPlain(alertRecord))
+    }
+
+    await safeDbPut(STORE.NOTIFICATIONS, toPlain(updatedNotif))
+
+    caseRecord.value = updatedCase
+    notification.value = updatedNotif
+
+    // Await sync before navigating — disposition MUST reach the server.
+    // If offline this returns quickly (navigator.onLine check). Data is in IDB.
+    try { await syncCaseToServer(localAuth) } catch (e) {
+      L.warn('dispositionCase: syncCaseToServer threw — navigating anyway, data safe in IDB', e?.message ?? e)
+    }
+
+    router.replace('/NotificationsCenter')
+  } catch (err) {
+    console.error('[SecondaryScreening] dispositionCase error:', err)
+    alert('Failed to save disposition. Please try again.')
+  } finally {
+    saving.value = false
+  }
+}
+
+// ─── CASE OPENING ─────────────────────────────────────────────────────────
+// Creates a new secondary case and transitions the notification OPEN→IN_PROGRESS.
+// openCaseLock prevents two concurrent _doInitPage() calls (onMounted + onIonViewDidEnter)
+// from each trying to create a case before either has written to IDB.
+async function openCase(localAuth) {
+  if (openCaseLock) {
+    L.warn('openCase() called while openCaseLock=true — skipping (duplicate concurrent call)')
+    return
+  }
+  openCaseLock = true
+  L.info('openCase() START', { user_id: localAuth?.id, notif_status: notification.value?.status })
+  try {
+    if (!localAuth?.id || !localAuth?.is_active) throw new Error('No auth')
+    if (!notification.value) throw new Error('notification.value is null — _doInitPage() must set it before calling openCase')
+
+    const now    = isoNow()
+    const gender = primaryScreening.value?.gender || 'UNKNOWN'
+
+    const newCase = createRecordBase(localAuth, {
+      primary_screening_id: notification.value.primary_screening_id,
+      notification_id:      notificationUuid.value,
+      opened_by_user_id:    localAuth.id,
+      case_status:          'IN_PROGRESS',
+      traveler_gender:      gender,
+      opened_at:            now,
+      opened_timezone:      Intl.DateTimeFormat().resolvedOptions().timeZone || null,
+      dispositioned_at:     null,
+      closed_at:            null,
+    })
+
+    const updatedNotif = {
+      ...notification.value,
+      status:           'IN_PROGRESS',
+      opened_at:        now,
+      assigned_user_id: localAuth.id,
+      record_version:   (notification.value.record_version || 1) + 1,
+      updated_at:       now,
+    }
+
+    await dbAtomicWrite([
+      { store: STORE.SECONDARY_SCREENINGS, record: toPlain(newCase)       },
+      { store: STORE.NOTIFICATIONS,        record: toPlain(updatedNotif)  },
+    ])
+
+    caseUuid.value     = newCase.client_uuid
+    caseRecord.value   = newCase
+    notification.value = updatedNotif
+
+    initSymptoms()
+    L.ok('openCase() complete', { caseUuid: newCase.client_uuid, notif_status: updatedNotif.status })
+
+    // Attempt server sync in background — non-blocking, data is safe in IDB
+    syncCaseToServer(localAuth).catch(e => L.warn('openCase: syncCaseToServer threw', e?.message ?? e))
+  } catch (err) {
+    L.err('openCase() FAILED', err)
+    throw err   // re-throw so _doInitPage catch block fires
+  } finally {
+    openCaseLock = false
+  }
+}
+
+// ─── AUTO SYNDROME DERIVATION ─────────────────────────────────────────────
+// Deterministic WHO-aligned syndrome classification from present symptom codes.
+// Evaluated in priority order — most specific / dangerous patterns first.
+// Returns one of the 11 SYNDROME codes. Called in saveStep3AndAnalyse().
+function deriveAutoSyndrome(presentCodes) {
+  const has = c => presentCodes.includes(c)
+  // Tier 1 — Haemorrhagic (highest — VHF must never be missed)
+  if (has('bleeding') || has('bleeding_gums_or_nose') || has('bloody_sputum') ||
+      has('petechial_or_purpuric_rash'))
+    return 'VHF'
+  // Tier 2 — Meningitis (fever + neck stiffness + neuro)
+  if (has('stiff_neck') && (has('fever') || has('high_fever') || has('sudden_onset_fever')) &&
+      (has('altered_consciousness') || has('photophobia') || has('seizures')))
+    return 'MENINGITIS'
+  // Tier 3 — Neurological
+  if (has('altered_consciousness') || has('seizures') || has('paralysis_acute_flaccid') ||
+      has('hydrophobia') || has('aerophobia'))
+    return 'NEUROLOGICAL'
+  // Tier 4 — Bloody diarrhoea
+  if (has('bloody_diarrhea')) return 'BLOODY_DIARRHEA'
+  // Tier 5 — SARI (fever + breathing difficulty)
+  if ((has('fever') || has('high_fever') || has('sudden_onset_fever')) &&
+      (has('shortness_of_breath') || has('difficulty_breathing') || has('rapid_breathing')))
+    return 'SARI'
+  // Tier 6 — Jaundice
+  if (has('jaundice') || has('dark_urine')) return 'JAUNDICE'
+  // Tier 7 — Febrile rash
+  if ((has('fever') || has('high_fever')) &&
+      (has('rash_maculopapular') || has('rash_vesicular_pustular') ||
+       has('rash_face_first') || has('painful_rash') || has('mucosal_lesions')))
+    return 'RASH_FEVER'
+  // Tier 8 — Acute watery diarrhoea / cholera pattern
+  if (has('watery_diarrhea') || has('rice_water_diarrhea') ||
+      (has('diarrhea') && has('severe_dehydration')))
+    return 'AWD'
+  // Tier 9 — ILI (fever + cough or sore throat)
+  if ((has('fever') || has('high_fever') || has('low_grade_fever') || has('sudden_onset_fever')) &&
+      (has('cough') || has('dry_cough') || has('sore_throat') || has('coryza')))
+    return 'ILI'
+  // Tier 10 — Any fever
+  if (has('fever') || has('high_fever') || has('sudden_onset_fever')) return 'OTHER'
+  return 'OTHER'
+}
+
+// ─── NOTIFICATION VERIFICATION ────────────────────────────────────────────
+const notifVerify = reactive({
+  running: false, ran: false,
+  idb: null, server: null, error: null, checks: [],
+  _serverCase: null, _serverFetchStatus: null,
+})
+
+async function verifyNotificationState() {
+  notifVerify.running = true
+  notifVerify.ran     = false
+  notifVerify.error   = null
+  notifVerify.checks  = []
+  notifVerify.idb     = null
+  notifVerify.server  = null
+  notifVerify._serverCase        = null
+  notifVerify._serverFetchStatus = null
+
+  const uuid = notificationUuid.value
+  if (!uuid) {
+    notifVerify.error = 'No notification UUID — page not fully loaded'
+    notifVerify.running = false; return
+  }
+
+  // 1. Read IDB
+  try {
+    const rec = await dbGet(STORE.NOTIFICATIONS, uuid)
+    notifVerify.idb = rec ? JSON.parse(JSON.stringify(rec)) : null
+  } catch (e) {
+    notifVerify.error = `IDB read failed: ${e?.message ?? e}`
+    notifVerify.running = false; return
+  }
+
+  // 2. Fetch from server via the secondary screening show endpoint.
+  //    GET /secondary-screenings/{id}?user_id={userId} returns the full case
+  //    including the embedded notification object. This is the only endpoint
+  //    that exposes notification state — there is no standalone GET /notifications/{id}.
+  const caseServerId = caseRecord.value?.id ?? caseRecord.value?.server_id ?? null
+  const userId       = getAuth()?.id ?? null
+  if (caseServerId && userId && navigator.onLine) {
+    try {
+      const ctrl = new AbortController()
+      const tid  = setTimeout(() => ctrl.abort(), APP.SYNC_TIMEOUT_MS)
+      const res  = await fetch(
+        `${window.SERVER_URL}/secondary-screenings/${caseServerId}?user_id=${userId}`,
+        { headers: { Accept: 'application/json' }, signal: ctrl.signal }
+      )
+      clearTimeout(tid)
+      if (res.ok) {
+        const body = await res.json().catch(() => ({}))
+        // body.data.notification is the embedded notification row
+        notifVerify.server = body?.data?.notification ?? null
+        // Also store the server case status for additional checks
+        notifVerify._serverCase = body?.data ?? null
+      } else {
+        notifVerify._serverFetchStatus = res.status
+      }
+    } catch { /* non-critical */ }
+  }
+
+  // 3. Run checks
+  const checks = []
+  const idb = notifVerify.idb
+  const srv = notifVerify.server
+  const cr  = caseRecord.value
+
+  checks.push({
+    label: 'Notification exists in local IDB',
+    pass:  !!idb,
+    detail: idb ? `status=${idb.status} sync=${idb.sync_status}` : 'NOT FOUND in IDB',
+  })
+  checks.push({
+    label: 'Notification status = IN_PROGRESS in IDB',
+    pass:  idb?.status === 'IN_PROGRESS',
+    detail: idb ? `"${idb.status}"` : 'n/a',
+  })
+  checks.push({
+    label: 'Notification has server integer id in IDB',
+    pass:  !!(idb?.id > 0),
+    detail: idb ? `id=${idb.id ?? 'NULL'}` : 'n/a',
+  })
+  checks.push({
+    label: 'Notification IDB sync_status = SYNCED',
+    pass:  idb?.sync_status === SYNC.SYNCED,
+    detail: idb ? `"${idb.sync_status}"` : 'n/a',
+  })
+  checks.push({
+    label: 'Secondary case has server id',
+    pass:  !!(cr?.id > 0),
+    detail: cr ? `case.id=${cr.id ?? 'NULL'} sync="${cr.sync_status}"` : 'no case record',
+  })
+  checks.push({
+    label: 'Secondary case sync_status = SYNCED',
+    pass:  cr?.sync_status === SYNC.SYNCED,
+    detail: cr ? `"${cr.sync_status}"` : 'n/a',
+  })
+  if (srv) {
+    checks.push({
+      label: 'Server notification status = IN_PROGRESS or CLOSED',
+      pass:  srv.status === 'IN_PROGRESS' || srv.status === 'CLOSED',
+      detail: `server_notification.status="${srv.status}"`,
+    })
+    checks.push({
+      label: 'IDB notification status matches server',
+      pass:  srv.status === idb?.status,
+      detail: `server="${srv.status}" idb="${idb?.status}"`,
+    })
+  }
+  // Server case status check (from the embedded secondary case fetch)
+  if (notifVerify._serverCase) {
+    checks.push({
+      label: 'Server case status matches local case status',
+      pass:  notifVerify._serverCase.case_status === cr?.case_status,
+      detail: `server="${notifVerify._serverCase.case_status}" local="${cr?.case_status}"`,
+    })
+    checks.push({
+      label: 'Server case sync_status = SYNCED',
+      pass:  notifVerify._serverCase.sync_status === SYNC.SYNCED,
+      detail: `server_case.sync_status="${notifVerify._serverCase.sync_status}"`,
+    })
+  } else if (navigator.onLine) {
+    const hint = !caseServerId
+      ? 'Case has no server id yet — run Force Sync first'
+      : `GET /secondary-screenings/${caseServerId} returned HTTP ${notifVerify._serverFetchStatus ?? 'error'}`
+    checks.push({
+      label: 'Server case + notification fetch',
+      pass:  false,
+      detail: hint,
+    })
+  }
+
+  notifVerify.checks  = checks
+  notifVerify.ran     = true
+  notifVerify.running = false
+}
+
+// ─── SERVER SYNC ENGINE ───────────────────────────────────────────────────
+// syncStatus: reactive object powering the on-screen sync test panel.
+// Every phase writes here so the officer sees what the server actually said.
+const syncStatus = reactive({
+  running:       false,
+  lastRunAt:     null,   // ISO string
+  phase1:        null,   // 'ok' | 'fail' | 'skip' | null
+  phase1Msg:     '',
+  phase1Payload: null,   // last payload sent (shown in detail panel)
+  phase1Resp:    null,   // last server response body
+  phase2:        null,   // 'ok' | 'fail' | 'skip' | null
+  phase2Msg:     '',
+  phase2Payload: null,
+  phase2Resp:    null,
+  error:         null,   // unhandled error message
+})
+
+async function syncCaseToServer(localAuth) {
+  syncStatus.running = true
+  syncStatus.error   = null
+  L.info('syncCaseToServer: START', {
+    online:      navigator.onLine,
+    caseUuid:    caseUuid.value,
+    caseId:      caseRecord.value?.id ?? null,
+    caseSyncSt:  caseRecord.value?.sync_status,
+    userId:      localAuth?.id,
+    SERVER_URL:  window.SERVER_URL,
+  })
+
+  try {
+    if (!navigator.onLine) {
+      syncStatus.phase1 = 'skip'; syncStatus.phase1Msg = 'Device offline'
+      syncStatus.phase2 = 'skip'; syncStatus.phase2Msg = 'Device offline'
+      L.info('syncCaseToServer: offline — skipping'); return
+    }
+    if (!caseRecord.value || !caseUuid.value) {
+      syncStatus.error = 'No case record loaded'
+      L.warn('syncCaseToServer: no caseRecord'); return
+    }
+    const userId = localAuth?.id
+    if (!userId) {
+      syncStatus.error = 'No auth user id'
+      L.warn('syncCaseToServer: no auth id'); return
+    }
+
+    // ── Phase 1: POST /secondary-screenings ─────────────────────────────
+    let serverId = caseRecord.value.id ?? caseRecord.value.server_id ?? null
+
+    if (!serverId) {
+      syncStatus.phase1 = null; syncStatus.phase1Msg = 'Sending…'
+      const notifServerId   = notification.value?.id ?? notification.value?.server_id ?? null
+      const primaryServerId = primaryScreening.value?.id ?? primaryScreening.value?.server_id ?? null
+
+      const p1 = {
+        opened_by_user_id:      userId,
+        client_uuid:            caseRecord.value.client_uuid,
+        reference_data_version: caseRecord.value.reference_data_version ?? APP.REFERENCE_DATA_VER,
+        notification_id:        notifServerId    ?? notification.value?.client_uuid   ?? caseRecord.value.notification_id,
+        primary_screening_id:   primaryServerId  ?? primaryScreening.value?.client_uuid ?? caseRecord.value.primary_screening_id,
+        device_id:              caseRecord.value.device_id,
+        app_version:            caseRecord.value.app_version ?? APP.VERSION,
+        platform:               caseRecord.value.platform    ?? 'WEB',
+        traveler_gender:        caseRecord.value.traveler_gender ?? 'UNKNOWN',
+        opened_at:              caseRecord.value.opened_at   ?? isoNow(),
+        opened_timezone:        caseRecord.value.opened_timezone ?? null,
+        record_version:         caseRecord.value.record_version ?? 1,
+      }
+      syncStatus.phase1Payload = p1
+      L.info('syncCaseToServer: Phase 1 payload', p1)
+
+      const ctrl = new AbortController()
+      const tid  = setTimeout(() => ctrl.abort(), APP.SYNC_TIMEOUT_MS)
+      try {
+        const res  = await fetch(`${window.SERVER_URL}/secondary-screenings`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+          body:   JSON.stringify(p1),
+          signal: ctrl.signal,
+        })
+        clearTimeout(tid)
+        const body = await res.json().catch(() => ({}))
+        syncStatus.phase1Resp = body
+        L.info('syncCaseToServer: Phase 1 response', { http: res.status, success: body?.success, data: body?.data, error: body?.error })
+
+        if (res.ok && body?.success) {
+          serverId = body.data?.id ?? null
+          if (serverId) {
+            const updated = {
+              ...toPlain(caseRecord.value),
+              id: serverId, server_id: serverId,
+              sync_status: SYNC.SYNCED, synced_at: isoNow(),
+              record_version: (caseRecord.value.record_version || 1) + 1,
+              updated_at: isoNow(),
+            }
+            await safeDbPut(STORE.SECONDARY_SCREENINGS, updated)
+            caseRecord.value = updated
+            syncStatus.phase1 = 'ok'
+            syncStatus.phase1Msg = `Created — server_id=${serverId}`
+            L.ok(`syncCaseToServer: Phase 1 OK — server_id=${serverId}`)
+          } else {
+            syncStatus.phase1 = 'fail'
+            syncStatus.phase1Msg = 'Server returned success=true but no id in data'
+            L.warn('syncCaseToServer: Phase 1 — missing id', body); return
+          }
+        } else {
+          syncStatus.phase1 = 'fail'
+          syncStatus.phase1Msg = `HTTP ${res.status}: ${body?.message ?? 'Unknown error'}`
+          if (body?.error) syncStatus.phase1Msg += ' | ' + JSON.stringify(body.error)
+          L.warn('syncCaseToServer: Phase 1 rejected', { status: res.status, body }); return
+        }
+      } catch (e) {
+        clearTimeout(tid)
+        syncStatus.phase1 = 'fail'
+        syncStatus.phase1Msg = e?.name === 'AbortError' ? 'Timed out' : `Network: ${e?.message ?? e}`
+        L.warn('syncCaseToServer: Phase 1 exception', e?.message ?? e); return
+      }
+    } else {
+      syncStatus.phase1 = 'skip'
+      syncStatus.phase1Msg = `Already on server — id=${serverId}`
+      L.info(`syncCaseToServer: Phase 1 skipped — case already has server_id=${serverId}`)
+    }
+
+    if (!serverId) { syncStatus.error = 'No server id after Phase 1'; return }
+
+    // ── Phase 1.5: State machine bridge ────────────────────────────────────
+    // store() always creates the case with case_status='OPEN' on the server.
+    // If Phase 1 just ran (phase1 === 'ok', meaning a NEW case was created),
+    // the server is now OPEN. The server's state machine only allows:
+    //   OPEN → IN_PROGRESS → DISPOSITIONED | CLOSED
+    // If our local case is DISPOSITIONED or CLOSED, sending that status directly
+    // to a freshly-created OPEN case produces a 409 Conflict.
+    // Fix: advance the server to IN_PROGRESS first, then Phase 2 sends the real status.
+    if (syncStatus.phase1 === 'ok') {
+      const localStatus = caseRecord.value.case_status
+      if (localStatus === 'DISPOSITIONED' || localStatus === 'CLOSED') {
+        L.info(`syncCaseToServer: Phase 1.5 — advancing server OPEN→IN_PROGRESS (local="${localStatus}")`)
+        try {
+          const ctrl15 = new AbortController()
+          const tid15  = setTimeout(() => ctrl15.abort(), APP.SYNC_TIMEOUT_MS)
+          const res15  = await fetch(`${window.SERVER_URL}/secondary-screenings/${serverId}/sync`, {
+            method:  'POST',
+            headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+            body:    JSON.stringify({ user_id: userId, case_status: 'IN_PROGRESS', record_version: 0 }),
+            signal:  ctrl15.signal,
+          })
+          clearTimeout(tid15)
+          const b15 = await res15.json().catch(() => ({}))
+          if (res15.ok && b15?.success) {
+            L.ok('syncCaseToServer: Phase 1.5 — server advanced to IN_PROGRESS')
+          } else {
+            L.warn('syncCaseToServer: Phase 1.5 — advance failed (Phase 2 will still attempt)', { status: res15.status, body: b15 })
+          }
+        } catch (e15) {
+          L.warn('syncCaseToServer: Phase 1.5 — network error (Phase 2 will still attempt)', e15?.message ?? e15)
+        }
+      }
+    }
+
+    // ── Phase 2: POST /secondary-screenings/{id}/sync ───────────────────
+    syncStatus.phase2 = null; syncStatus.phase2Msg = 'Sending…'
+    L.info(`syncCaseToServer: Phase 2 — POST /secondary-screenings/${serverId}/sync`)
+
+    let idbSymptoms = [], idbExposures = [], idbActions = [], idbTc = [], idbDiseases = []
+    try {
+      const sid = caseUuid.value;
+      [idbSymptoms, idbExposures, idbActions, idbTc, idbDiseases] = await Promise.all([
+        dbGetByIndex(STORE.SECONDARY_SYMPTOMS,           'secondary_screening_id', sid),
+        dbGetByIndex(STORE.SECONDARY_EXPOSURES,          'secondary_screening_id', sid),
+        dbGetByIndex(STORE.SECONDARY_ACTIONS,            'secondary_screening_id', sid),
+        dbGetByIndex(STORE.SECONDARY_TRAVEL_COUNTRIES,   'secondary_screening_id', sid),
+        dbGetByIndex(STORE.SECONDARY_SUSPECTED_DISEASES, 'secondary_screening_id', sid),
+      ])
+      L.info('syncCaseToServer: IDB child reads', {
+        symptoms: idbSymptoms.length, exposures: idbExposures.length,
+        actions: idbActions.length, tc: idbTc.length, diseases: idbDiseases.length,
+      })
+    } catch (idbErr) {
+      syncStatus.phase2 = 'fail'
+      syncStatus.phase2Msg = `IDB child read failed: ${idbErr?.message ?? idbErr}`
+      L.warn('syncCaseToServer: Phase 2 IDB read error', idbErr); return
+    }
+
+    const cr = caseRecord.value
+    const p2 = {
+      user_id:                           userId,
+      record_version:                    cr.record_version ?? 1,
+      case_status:                       cr.case_status,
+      traveler_full_name:                cr.traveler_full_name                ?? null,
+      traveler_gender:                   cr.traveler_gender                   ?? 'UNKNOWN',
+      traveler_age_years:                cr.traveler_age_years                ?? null,
+      travel_document_type:              cr.travel_document_type              ?? null,
+      travel_document_number:            cr.travel_document_number            ?? null,
+      traveler_nationality_country_code: cr.traveler_nationality_country_code ?? null,
+      residence_country_code:            cr.residence_country_code            ?? null,
+      phone_number:                      cr.phone_number                      ?? null,
+      journey_start_country_code:        cr.journey_start_country_code        ?? null,
+      conveyance_type:                   cr.conveyance_type                   ?? null,
+      conveyance_identifier:             cr.conveyance_identifier             ?? null,
+      arrival_datetime:                  cr.arrival_datetime                  ?? null,
+      purpose_of_travel:                 cr.purpose_of_travel                 ?? null,
+      destination_district_code:         cr.destination_district_code         ?? null,
+      temperature_value:                 cr.temperature_value                 ?? null,
+      temperature_unit:                  cr.temperature_unit                  ?? null,
+      pulse_rate:                        cr.pulse_rate                        ?? null,
+      respiratory_rate:                  cr.respiratory_rate                  ?? null,
+      bp_systolic:                       cr.bp_systolic                       ?? null,
+      bp_diastolic:                      cr.bp_diastolic                      ?? null,
+      oxygen_saturation:                 cr.oxygen_saturation                 ?? null,
+      triage_category:                   cr.triage_category                   ?? null,
+      emergency_signs_present:           cr.emergency_signs_present           ?? 0,
+      general_appearance:                cr.general_appearance                ?? null,
+      syndrome_classification:           cr.syndrome_classification           ?? null,
+      risk_level:                        cr.risk_level                        ?? null,
+      officer_notes:                     cr.officer_notes                     ?? null,
+      final_disposition:                 cr.final_disposition                 ?? null,
+      followup_required:                 cr.followup_required                 ?? 0,
+      followup_assigned_level:           cr.followup_assigned_level           ?? null,
+      dispositioned_at:                  cr.dispositioned_at                  ?? null,
+      closed_at:                         cr.closed_at                         ?? null,
+      symptoms:          idbSymptoms.map(s  => ({ symptom_code:  s.symptom_code,  is_present: s.is_present, onset_date: s.onset_date ?? null, details: s.details ?? null })),
+      exposures:         idbExposures.map(e  => ({ exposure_code: e.exposure_code, response: e.response,   details: e.details ?? null })),
+      actions:           idbActions.map(a   => ({ action_code:   a.action_code,   is_done: a.is_done,     details: a.details ?? null })),
+      travel_countries:  idbTc.map(t        => ({ country_code:  t.country_code,  travel_role: t.travel_role, arrival_date: t.arrival_date ?? null, departure_date: t.departure_date ?? null })),
+      suspected_diseases:idbDiseases.map(d  => ({ disease_code:  d.disease_code,  rank_order: d.rank_order, confidence: d.confidence ?? null, reasoning: d.reasoning ?? null })),
+    }
+    syncStatus.phase2Payload = { ...p2, symptoms: `[${p2.symptoms.length} items]`, exposures: `[${p2.exposures.length}]`, actions: `[${p2.actions.length}]` }
+    L.info('syncCaseToServer: Phase 2 payload summary', {
+      case_status: p2.case_status, user_id: p2.user_id,
+      symptoms: p2.symptoms.length, exposures: p2.exposures.length,
+      actions: p2.actions.length, tc: p2.travel_countries.length,
+      url: `${window.SERVER_URL}/secondary-screenings/${serverId}/sync`,
+    })
+
+    const ctrl2 = new AbortController()
+    const tid2  = setTimeout(() => ctrl2.abort(), APP.SYNC_TIMEOUT_MS)
+    try {
+      const res2 = await fetch(`${window.SERVER_URL}/secondary-screenings/${serverId}/sync`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body:   JSON.stringify(p2),
+        signal: ctrl2.signal,
+      })
+      clearTimeout(tid2)
+      const body2 = await res2.json().catch(() => ({}))
+      syncStatus.phase2Resp = body2
+      L.info('syncCaseToServer: Phase 2 response', { http: res2.status, success: body2?.success, meta: body2?.meta, error: body2?.error })
+
+      if (res2.ok && body2?.success) {
+        const sc = body2.data ?? {}
+        const synced = {
+          ...toPlain(caseRecord.value),
+          id: sc.id ?? serverId, server_id: sc.id ?? serverId,
+          sync_status: SYNC.SYNCED, synced_at: isoNow(),
+          record_version: (caseRecord.value.record_version || 1) + 1,
+          updated_at: isoNow(),
+        }
+        await safeDbPut(STORE.SECONDARY_SCREENINGS, synced)
+        caseRecord.value = synced
+        syncStatus.phase2 = 'ok'
+        syncStatus.phase2Msg = `Synced — status=${sc.case_status} child_tables=${JSON.stringify(body2.meta?.child_tables_sync ?? {})}`
+        syncStatus.lastRunAt = isoNow()
+        L.ok('syncCaseToServer: Phase 2 OK', body2.meta)
+      } else {
+        // ── 409 Conflict: check if case is already CLOSED on the server ──
+        // The server permanently rejects ANY sync to a CLOSED case with 409.
+        // This happens when a previous sync successfully closed the case but
+        // the local IDB record was not updated (e.g. network cut after server
+        // committed but before the response reached the client).
+        // Treatment: the case is already done — reconcile local IDB to CLOSED/SYNCED.
+        const alreadyClosed = res2.status === 409 &&
+          (body2?.message ?? '').toLowerCase().includes('closed')
+
+        if (alreadyClosed) {
+          L.ok('syncCaseToServer: Phase 2 — server case already CLOSED (idempotent). Reconciling local IDB.')
+          const reconciled = {
+            ...toPlain(caseRecord.value),
+            id:           serverId, server_id: serverId,
+            case_status:  'CLOSED',
+            closed_at:    caseRecord.value.closed_at ?? isoNow(),
+            sync_status:  SYNC.SYNCED,
+            synced_at:    isoNow(),
+            last_sync_error: null,
+            record_version: (caseRecord.value.record_version || 1) + 1,
+            updated_at:   isoNow(),
+          }
+          await safeDbPut(STORE.SECONDARY_SCREENINGS, reconciled)
+          caseRecord.value = reconciled
+          // Also close the notification in IDB if still open
+          if (notification.value && notification.value.status !== 'CLOSED') {
+            const closedNotif = {
+              ...toPlain(notification.value),
+              status:    'CLOSED',
+              closed_at: reconciled.closed_at,
+              record_version: (notification.value.record_version || 1) + 1,
+              updated_at: isoNow(),
+            }
+            await safeDbPut(STORE.NOTIFICATIONS, closedNotif)
+            notification.value = closedNotif
+          }
+          syncStatus.phase2 = 'ok'
+          syncStatus.phase2Msg = 'Server case was already CLOSED — local IDB reconciled'
+          syncStatus.lastRunAt = isoNow()
+        } else {
+          syncStatus.phase2 = 'fail'
+          syncStatus.phase2Msg = `HTTP ${res2.status}: ${body2?.message ?? 'Unknown'}`
+          if (body2?.error) syncStatus.phase2Msg += ' | ' + JSON.stringify(body2.error)
+          await safeDbPut(STORE.SECONDARY_SCREENINGS, {
+            ...toPlain(caseRecord.value),
+            sync_status: SYNC.FAILED,
+            last_sync_error: body2?.message ?? `HTTP ${res2.status}`,
+            record_version: (caseRecord.value.record_version || 1) + 1,
+            updated_at: isoNow(),
+          })
+          L.warn('syncCaseToServer: Phase 2 rejected', { status: res2.status, body: body2 })
+        }
+      }   // end if (res2.ok) / else
+    } catch (e) {
+      clearTimeout(tid2)
+      syncStatus.phase2 = 'fail'
+      syncStatus.phase2Msg = e?.name === 'AbortError' ? 'Timed out' : `Network: ${e?.message ?? e}`
+      L.warn('syncCaseToServer: Phase 2 exception', e?.message ?? e)
+    }
+  } catch (outerErr) {
+    syncStatus.error = outerErr?.message ?? String(outerErr)
+    L.err('syncCaseToServer: OUTER UNCAUGHT ERROR', outerErr)
+  } finally {
+    syncStatus.running  = false
+    syncStatus.lastRunAt = syncStatus.lastRunAt ?? isoNow()
+  }
+}
+
+
+// THE BUG THAT WAS CAUSING "LOADING FOREVER":
+//   initPageRunning was a plain JS boolean lock. When onIonViewWillEnter held
+//   the lock and onIonViewDidEnter arrived while _doInitPage() was mid-await,
+//   onIonViewDidEnter hit `if (initPageRunning) return` and was permanently
+//   discarded. If that first run was a no-op empty-uuid early-return, loading
+//   was never cleared. Final fix: no global lock, two clean triggers only.
+//
+// TWO TRIGGERS:
+//   onMounted + nextTick  — initial render AND Vite HMR (HMR fully remounts
+//                           <script setup>, so onMounted re-fires with fresh state).
+//
+//   onIonViewDidEnter     — every subsequent Ionic page-enter (back navigation,
+//                           re-entry). Fires AFTER page animation — route.params
+//                           is GUARANTEED populated at this point.
+//                           onMounted does NOT fire on re-entry (keep-alive).
+//
+// onIonViewWillEnter intentionally REMOVED — fires before Ionic commits the
+// route, route.params may still be previous page's params at that moment.
+//
+// No outer lock. Idempotency check inside _doInitPage() prevents double work
+// once data is loaded. openCaseLock below prevents the only real race: two
+// concurrent calls creating two IDB case records before either commits.
+
+let openCaseLock = false
+
+// ─── DIAGNOSTIC LOGGER ────────────────────────────────────────────────────
+const L = {
+  _ts() { return new Date().toISOString().slice(11,23) },
+  info(msg,  data) { console.log(   `%c[SS][${L._ts()}] ℹ ${msg}`,  'color:#1565C0;font-weight:700', ...(data!==undefined?[data]:[]) ) },
+  ok(  msg,  data) { console.log(   `%c[SS][${L._ts()}] ✓ ${msg}`,  'color:#2E7D32;font-weight:700', ...(data!==undefined?[data]:[]) ) },
+  warn(msg,  data) { console.warn(  `%c[SS][${L._ts()}] ⚠ ${msg}`,  'color:#E65100;font-weight:700', ...(data!==undefined?[data]:[]) ) },
+  err( msg,  data) { console.error( `%c[SS][${L._ts()}] ✖ ${msg}`,  'color:#C62828;font-weight:700', ...(data!==undefined?[data]:[]) ) },
+}
+
+async function _doInitPage(source) {
+  // Router param name varies across router file versions — read both and use whichever is set
+  const uuid = String(route.params.notificationId || route.params.notificationUuid || '').trim()
+
+  // [debug removed — admin panel available for diagnostics]
+
+  if (!uuid) {
+    L.warn(`[${source}] uuid EMPTY — route params not committed yet. Spinner stays until next trigger.`, {
+      hint: 'Check that route /secondary-screening/:notificationUuid is matched correctly.',
+    })
+    return
+  }
+
+  if (notificationUuid.value === uuid && caseRecord.value) {
+    L.ok(`[${source}] IDEMPOTENT — uuid="${uuid}" already loaded, caseRecord exists. Skipping.`)
+    return
+  }
+
+  L.info(`[${source}] Starting full load for uuid="${uuid}"`)
+  notificationUuid.value = uuid
+  loading.value          = true
+  notFound.value         = false
+  poeMismatch.value      = false
+
+  const localAuth = getAuth()
+  if (!localAuth?.id || !localAuth?.is_active) {
+    L.err(`[${source}] AUTH FAILED — id=${localAuth?.id} is_active=${localAuth?.is_active}. Aborting.`)
+    loading.value = false
+    return
+  }
+  L.ok(`[${source}] Auth OK — user id=${localAuth.id} poe=${localAuth.poe_code}`)
+
+  try {
+    L.info(`[${source}] IDB: dbGet NOTIFICATIONS "${uuid}"`)
+    const notif = await dbGet(STORE.NOTIFICATIONS, uuid)
+    if (!notif) {
+      L.err(`[${source}] NOTIFICATION NOT FOUND in IDB for uuid="${uuid}"`, {
+        hint: 'Primary screening may not have synced its notification to this device yet.',
+        store: STORE.NOTIFICATIONS,
+      })
+      notFound.value = true
+      return
+    }
+    L.ok(`[${source}] Notification loaded`, { status: notif.status, priority: notif.priority, poe_code: notif.poe_code })
+    notification.value = { ...notif, id: notif.id ?? notif.server_id ?? null }
+
+    const userPoe  = auth?.poe_code  ?? ''
+    const notifPoe = notif.poe_code  ?? ''
+    if (userPoe && notifPoe && userPoe !== notifPoe) {
+      L.warn(`POE mismatch — user:${userPoe} notif:${notifPoe}`)
+      poeMismatch.value = true
+    }
+
+    if (notif.primary_screening_id) {
+      L.info(`[${source}] IDB: dbGet PRIMARY_SCREENINGS "${notif.primary_screening_id}"`)
+      const ps = await dbGet(STORE.PRIMARY_SCREENINGS, notif.primary_screening_id)
+      primaryScreening.value = ps ?? null
+      if (ps) {
+        L.ok(`[${source}] Primary screening loaded — gender=${ps.gender}`)
+        if (ps.gender)             profile.traveler_gender    = ps.gender
+        if (ps.traveler_full_name) profile.traveler_full_name = ps.traveler_full_name
+      } else {
+        L.warn(`[${source}] Primary screening NOT FOUND for id="${notif.primary_screening_id}" — proceeding without it`)
+      }
+    } else {
+      L.warn(`[${source}] Notification has no primary_screening_id — this is unexpected`)
+    }
+
+    L.info(`[${source}] IDB: dbGetByIndex SECONDARY_SCREENINGS notification_id="${uuid}"`)
+    const existingCases = await dbGetByIndex(
+      STORE.SECONDARY_SCREENINGS, 'notification_id', uuid
+    )
+    L.info(`[${source}] Existing cases found: ${existingCases.length}`)
+
+    if (existingCases.length > 0) {
+      const existing  = existingCases[0]
+      L.ok(`[${source}] RESUMING case — uuid="${existing.client_uuid}" status="${existing.case_status}"`)
+      caseUuid.value   = existing.client_uuid
+      caseRecord.value = { ...existing, id: existing.id ?? existing.server_id ?? null }
+
+      Object.assign(profile, {
+        traveler_full_name:                existing.traveler_full_name                || '',
+        traveler_gender:                   existing.traveler_gender                   || profile.traveler_gender,
+        traveler_age_years:                existing.traveler_age_years                || null,
+        travel_document_type:              existing.travel_document_type              || '',
+        travel_document_number:            existing.travel_document_number            || '',
+        traveler_nationality_country_code: existing.traveler_nationality_country_code || '',
+        residence_country_code:            existing.residence_country_code            || '',
+        phone_number:                      existing.phone_number                      || '',
+        journey_start_country_code:        existing.journey_start_country_code        || '',
+        conveyance_type:                   existing.conveyance_type                   || '',
+        conveyance_identifier:             existing.conveyance_identifier             || '',
+        arrival_datetime_input:            existing.arrival_datetime
+                                             ? existing.arrival_datetime.slice(0, 16) : '',
+        purpose_of_travel:                 existing.purpose_of_travel                || '',
+        destination_district_code:         existing.destination_district_code        || '',
+      })
+
+      if (existing.temperature_value != null) {
+        showVitals.value = true
+        Object.assign(vitals, {
+          temperature_value:       existing.temperature_value,
+          temperature_unit:        existing.temperature_unit        || 'C',
+          pulse_rate:              existing.pulse_rate,
+          respiratory_rate:        existing.respiratory_rate,
+          bp_systolic:             existing.bp_systolic,
+          bp_diastolic:            existing.bp_diastolic,
+          oxygen_saturation:       existing.oxygen_saturation,
+          triage_category:         existing.triage_category         || '',
+          emergency_signs_present: existing.emergency_signs_present || 0,
+          general_appearance:      existing.general_appearance       || '',
+        })
+      }
+
+      Object.assign(caseDecision, {
+        syndrome_classification:  existing.syndrome_classification  || '',
+        risk_level:               existing.risk_level               || '',
+        final_disposition:        existing.final_disposition        || '',
+        officer_notes:            existing.officer_notes            || '',
+        followup_required:        !!existing.followup_required,
+        followup_assigned_level:  existing.followup_assigned_level  || '',
+      })
+
+      const sid = existing.client_uuid
+      travelCountries.value  = await dbGetByIndex(STORE.SECONDARY_TRAVEL_COUNTRIES,   'secondary_screening_id', sid) || []
+      initSymptoms()
+      const savedSymptoms    = await dbGetByIndex(STORE.SECONDARY_SYMPTOMS,            'secondary_screening_id', sid)
+      for (const s of savedSymptoms) {
+        if (symptomsMap[s.symptom_code]) {
+          symptomsMap[s.symptom_code].is_present = s.is_present
+          symptomsMap[s.symptom_code].onset_date  = s.onset_date
+          symptomsMap[s.symptom_code].details     = s.details
+          symptomsMap[s.symptom_code].client_uuid = s.client_uuid
+        }
+      }
+      const savedExposures   = await dbGetByIndex(STORE.SECONDARY_EXPOSURES,           'secondary_screening_id', sid)
+      for (const se of savedExposures) {
+        const found = exposures.find(e => e.db_code === se.exposure_code)
+        if (found) found.response = se.response
+      }
+      actions.value           = await dbGetByIndex(STORE.SECONDARY_ACTIONS,            'secondary_screening_id', sid) || []
+      suspectedDiseases.value = await dbGetByIndex(STORE.SECONDARY_SUSPECTED_DISEASES, 'secondary_screening_id', sid) || []
+
+      if (['DISPOSITIONED', 'CLOSED'].includes(existing.case_status)) step.value = 4
+      L.ok(`[${source}] Case resume complete. step=${step.value}`)
+
+    } else {
+      L.info(`[${source}] NEW case — notification.status="${notif.status}"`)
+      if (notif.status === 'OPEN' || notif.status === 'IN_PROGRESS') {
+        L.info(`[${source}] Calling openCase()`)
+        await openCase(localAuth)
+        L.ok(`[${source}] openCase() complete — caseUuid="${caseUuid.value}"`)
+      } else {
+        L.warn(`[${source}] Notification status="${notif.status}" is not OPEN/IN_PROGRESS — openCase skipped`)
+      }
+    }
+
+  } catch (err) {
+    L.err(`[${source}] UNHANDLED ERROR in _doInitPage`, err)
+    console.error('[SecondaryScreening] Full error:', err)
+    notFound.value = true
+  } finally {
+    L.info(`[${source}] finally — setting loading=false. notFound=${notFound.value} caseRecord=${!!caseRecord.value}`)
+    loading.value = false
+  }
+}
+
+// ── Trigger 1: route-param watcher (PRIMARY — handles every scenario) ────
+// { immediate: true } fires synchronously during setup IF params are already
+// set. If params are empty (direct URL load, Ionic pre-create), it fires again
+// the moment Vue Router commits the route and sets the param. This is the only
+// trigger that reliably works on direct browser URL entry / page refresh.
+watch(
+  () => route.params.notificationUuid,
+  (newUuid) => {
+    const uuid = String(newUuid || '').trim()
+    if (uuid) void _doInitPage('routeParamWatch')
+  },
+  { immediate: true }
+)
+
+// ── Trigger 2: onMounted (Vite HMR recovery + belt-and-suspenders) ────────
+// Vue 3 HMR fully remounts <script setup> components, so onMounted re-fires.
+// nextTick ensures Vue Router has had one render cycle to commit params.
+onMounted(async () => {
+  await nextTick()
+  void _doInitPage('onMounted')
+})
+
+// ── Trigger 3: onIonViewDidEnter (in-app navigation, back-nav) ───────────
+// Fires AFTER Ionic page animation — only on navigations within the running app.
+// Does NOT fire on direct URL load (which is why the route-param watch is needed).
+onIonViewDidEnter(async () => {
+  await nextTick()
+  void _doInitPage('onIonViewDidEnter')
+})
+</script>
+
+
+<style scoped>
+/* ═══════════════════════════════════════════════════════════════
+   SecondaryScreening.vue — Scoped styles
+   Namespace: sc-*
+   Theme: WHO/IHR operational — clinical urgency palette
+   NO dark mode. NO @media prefers-color-scheme.
+═══════════════════════════════════════════════════════════════ */
+
+/* ── HEADER ───────────────────────────────────────────────────── */
+.sc-header {
+  --background: transparent;
+  background: linear-gradient(180deg, #0D47A1 0%, #1565C0 100%);
+  position: relative;
+}
+.sc-hdr-pattern {
+  position: absolute; inset: 0;
+  background: radial-gradient(ellipse at 85% 15%, rgba(255,255,255,.07), transparent 55%);
+  pointer-events: none;
+}
+
+.sc-hdr-top {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 16px 0; position: relative; z-index: 2;
+}
+.sc-back-btn {
+  width: 36px; height: 36px; border-radius: 50%;
+  background: rgba(255,255,255,.12); border: 1px solid rgba(255,255,255,.2);
+  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+  cursor: pointer; -webkit-tap-highlight-color: transparent;
+  transition: background .12s;
+}
+.sc-back-btn:active { background: rgba(255,255,255,.22); }
+.sc-back-btn svg { width: 16px; height: 16px; }
+
+.sc-title-block { flex: 1; }
+.sc-eyebrow {
+  font-size: 9px; font-weight: 700; letter-spacing: 2px;
+  text-transform: uppercase; color: rgba(255,255,255,.5); display: block;
+}
+.sc-page-title {
+  font-size: 17px; font-weight: 800; color: #fff; letter-spacing: -.2px; line-height: 1.2;
+}
+
+.sc-hdr-right { flex-shrink: 0; }
+.sc-sync-pill {
+  display: flex; align-items: center; gap: 5px;
+  padding: 4px 10px; border-radius: 10px; border: 1px solid;
+  font-size: 10px; font-weight: 700;
+}
+.sc-sync-dot { width: 6px; height: 6px; border-radius: 50%; }
+.sc-sync-pill--ok      { background: rgba(46,125,50,.25);  border-color: rgba(46,125,50,.4);   color: #A5D6A7; }
+.sc-sync-pill--ok .sc-sync-dot      { background: #66BB6A; }
+.sc-sync-pill--pending { background: rgba(230,81,0,.2);   border-color: rgba(230,81,0,.35);  color: #FFCC80; }
+.sc-sync-pill--pending .sc-sync-dot { background: #FFA726; }
+.sc-sync-pill--offline { background: rgba(255,255,255,.1); border-color: rgba(255,255,255,.2); color: rgba(255,255,255,.6); }
+.sc-sync-pill--offline .sc-sync-dot { background: rgba(255,255,255,.5); }
+
+/* Case summary strip */
+.sc-case-strip {
+  display: flex; align-items: center; gap: 10px;
+  margin: 8px 14px 0; background: rgba(255,255,255,.1);
+  border: 1px solid rgba(255,255,255,.15); border-radius: 14px;
+  padding: 9px 12px; position: relative; z-index: 2;
+}
+.sc-case-ic { width: 28px; height: 28px; border-radius: 8px;
+  background: rgba(255,255,255,.12); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.sc-case-ic svg { width: 14px; height: 14px; }
+.sc-case-info { flex: 1; min-width: 0; }
+.sc-case-name { font-size: 13px; font-weight: 700; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sc-case-meta { font-size: 10px; color: rgba(255,255,255,.5); margin-top: 1px; }
+.sc-prio-pill {
+  padding: 3px 9px; border-radius: 7px; font-size: 9px; font-weight: 800;
+  letter-spacing: .5px; text-transform: uppercase; flex-shrink: 0;
+}
+.sc-prio-pill--critical { background: rgba(198,40,40,.25); color: #FFCDD2; border: 1px solid rgba(198,40,40,.4); }
+.sc-prio-pill--high     { background: rgba(230,81,0,.25);  color: #FFCC80; border: 1px solid rgba(230,81,0,.4);  }
+.sc-prio-pill--normal   { background: rgba(255,255,255,.12); color: rgba(255,255,255,.7); border: 1px solid rgba(255,255,255,.2); }
+
+/* 4-step progress bar */
+.sc-stepper {
+  display: flex; align-items: center;
+  padding: 10px 14px 12px; position: relative; z-index: 2;
+}
+.sc-step-wrap { display: flex; align-items: center; flex: 1; }
+.sc-step-wrap:last-child { flex: none; }
+.sc-step {
+  display: flex; flex-direction: column; align-items: center; gap: 3px;
+  background: none; border: none; cursor: pointer; padding: 0; flex-shrink: 0;
+  -webkit-tap-highlight-color: transparent;
+}
+.sc-step-node {
+  width: 22px; height: 22px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  transition: background .2s, border-color .2s;
+}
+.sc-step--done   .sc-step-node { background: #10B981; border: none; }
+.sc-step--active .sc-step-node { background: #fff; border: 2px solid #fff; }
+.sc-step--future .sc-step-node { background: rgba(255,255,255,.1); border: 1.5px solid rgba(255,255,255,.3); }
+.sc-step--active .sc-step-node { animation: sc-node-pulse 2s infinite; }
+@keyframes sc-node-pulse { 0%,100%{box-shadow:0 0 0 0 rgba(255,255,255,.4)} 50%{box-shadow:0 0 0 5px rgba(255,255,255,.0)} }
+.sc-step-num  { font-size: 10px; font-weight: 800; }
+.sc-step--done   .sc-step-num   { color: #fff; }
+.sc-step--active .sc-step-num   { color: #1565C0; }
+.sc-step--future .sc-step-num   { color: rgba(255,255,255,.5); }
+.sc-step-lbl {
+  font-size: 8px; font-weight: 700; text-transform: uppercase; letter-spacing: .4px;
+  white-space: nowrap;
+}
+.sc-step--done   .sc-step-lbl   { color: rgba(255,255,255,.8); }
+.sc-step--active .sc-step-lbl   { color: #fff; }
+.sc-step--future .sc-step-lbl   { color: rgba(255,255,255,.4); }
+.sc-step-line { flex: 1; height: 1.5px; background: rgba(255,255,255,.2); margin: 0 4px; position: relative; top: -7px; }
+.sc-step-line--done { background: rgba(255,255,255,.5); }
+
+/* ── CONTENT ──────────────────────────────────────────────────── */
+.sc-content { --background: #EEF2FF; }
+.sc-body { padding: 12px 14px 20px; display: flex; flex-direction: column; gap: 0; }
+
+/* Guards */
+.sc-guard {
+  display: flex; align-items: flex-start; gap: 12px;
+  margin: 16px; padding: 16px; border-radius: 16px;
+  background: linear-gradient(135deg, #C62828, #D32F2F);
+}
+.sc-guard--warn { background: linear-gradient(135deg, #E65100, #F57C00); }
+.sc-guard svg { width: 22px; height: 22px; flex-shrink: 0; margin-top: 1px; }
+.sc-guard-title { font-size: 14px; font-weight: 800; color: #fff; }
+.sc-guard-sub   { font-size: 12px; color: rgba(255,255,255,.8); margin-top: 3px; }
+
+/* POE mismatch advisory */
+.sc-poe-warn {
+  display: flex; align-items: flex-start; gap: 9px;
+  padding: 10px 12px; border-radius: 12px; margin-bottom: 6px;
+  background: #FFF8E1; border: 1.5px solid #FFB300;
+  font-size: 12px; color: #5D4037; line-height: 1.4;
+}
+.sc-poe-warn svg { width: 16px; height: 16px; flex-shrink: 0; margin-top: 1px; stroke: #E65100; }
+
+/* Loading */
+.sc-loading { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 200px; gap: 12px; }
+.sc-spinner { width: 32px; height: 32px; border: 3px solid #E3EAF8; border-top-color: #1565C0; border-radius: 50%; animation: sc-spin .8s linear infinite; }
+@keyframes sc-spin { to { transform: rotate(360deg); } }
+.sc-loading-txt { font-size: 13px; color: #78909C; font-weight: 600; }
+
+/* ── SECTION HEADERS ──────────────────────────────────────────── */
+.sc-section-hdr {
+  display: flex; align-items: center; gap: 8px;
+  margin: 14px 0 8px;
+}
+.sc-sec-num {
+  width: 22px; height: 22px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 900; color: #fff; flex-shrink: 0;
+}
+.sc-sec-num--blue   { background: #1565C0; }
+.sc-sec-num--orange { background: #E65100; }
+.sc-sec-num--red    { background: #C62828; }
+.sc-sec-num--green  { background: #2E7D32; }
+.sc-sec-num--purple { background: #6A1B9A; }
+.sc-sec-title { font-size: 13px; font-weight: 700; color: #0D1B3E; letter-spacing: -.1px; flex: 1; }
+.sc-sec-badge {
+  padding: 2px 8px; border-radius: 6px; font-size: 9px;
+  font-weight: 800; letter-spacing: .4px; text-transform: uppercase;
+}
+.sc-sec-badge--req  { background: #FFEBEE; color: #C62828; border: 1px solid #FFCDD2; }
+.sc-sec-badge--opt  { background: #ECEFF1; color: #78909C; border: 1px solid #E0E0E0; }
+.sc-sec-badge--warn { background: #FFF3E0; color: #E65100; border: 1px solid #FFCC80; }
+
+/* ── FIELD CARD ───────────────────────────────────────────────── */
+.sc-card { background: #fff; border: 1px solid #E3EAF8; border-radius: 16px; overflow: hidden; }
+
+.sc-field-row {
+  display: flex; align-items: flex-start; gap: 10px;
+  padding: 11px 14px;
+  border-bottom: 1px solid #F1F5FB;
+}
+.sc-field-row--last { border-bottom: none; }
+.sc-field-ic {
+  width: 30px; height: 30px; border-radius: 9px; background: #F0F4FF;
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0; margin-top: 1px;
+}
+.sc-field-ic svg { width: 14px; height: 14px; }
+.sc-field-body { flex: 1; min-width: 0; }
+.sc-field-lbl {
+  font-size: 9.5px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: .6px; color: #90A4AE; display: block; margin-bottom: 4px;
+}
+.sc-field-input {
+  width: 100%; border: 1.5px solid #E3EAF8; border-radius: 10px;
+  padding: 7px 10px; font-size: 14px; font-weight: 500; color: #0D1B3E;
+  background: #FAFAFA; outline: none; font-family: inherit;
+  transition: border-color .15s, background .15s;
+}
+.sc-field-input--short { max-width: 120px; }
+.sc-field-input:focus  { border-color: #1565C0; background: #fff; }
+.sc-field-select {
+  width: 100%; border: 1.5px solid #E3EAF8; border-radius: 10px;
+  padding: 7px 10px; font-size: 14px; color: #0D1B3E;
+  background: #FAFAFA; outline: none; font-family: inherit;
+  -webkit-appearance: none;
+}
+.sc-field-select:focus { border-color: #1565C0; background: #fff; }
+.sc-field-err {
+  font-size: 11.5px; font-weight: 700; color: #C62828;
+  background: #FFEBEE; border: 1px solid #FFCDD2;
+  border-radius: 8px; padding: 6px 10px; margin-bottom: 6px;
+}
+
+/* Gender buttons */
+.sc-gender-row { display: flex; gap: 6px; flex-wrap: wrap; }
+.sc-gender-btn {
+  padding: 5px 12px; border-radius: 10px; border: 1.5px solid #E3EAF8;
+  background: #F4F7FF; font-size: 12px; font-weight: 700; color: #546E7A;
+  cursor: pointer; transition: all .12s;
+  -webkit-tap-highlight-color: transparent;
+}
+.sc-gender-btn--active { background: #1565C0; border-color: #0D47A1; color: #fff; }
+.sc-gender-btn:active  { transform: scale(.95); }
+
+/* Chip buttons (doc type, conveyance) */
+.sc-chip-row { display: flex; gap: 6px; flex-wrap: wrap; }
+.sc-chip-btn {
+  padding: 5px 11px; border-radius: 10px; border: 1.5px solid #E3EAF8;
+  background: #F4F7FF; font-size: 11.5px; font-weight: 700; color: #546E7A;
+  cursor: pointer; transition: all .12s;
+  -webkit-tap-highlight-color: transparent;
+}
+.sc-chip-btn--active { background: #E3F2FD; border-color: #1565C0; color: #0D47A1; }
+.sc-chip-btn:active  { transform: scale(.95); }
+
+/* ── TRAVEL COUNTRIES ─────────────────────────────────────────── */
+.sc-empty-travel {
+  display: flex; align-items: center; gap: 8px;
+  padding: 12px 14px; background: #F4F7FF;
+  border: 1.5px dashed #CFD8DC; border-radius: 12px;
+  font-size: 12px; color: #B0BEC5; font-weight: 600;
+}
+.sc-empty-travel svg { width: 18px; height: 18px; flex-shrink: 0; }
+.sc-tc-row {
+  display: flex; gap: 6px; align-items: center;
+  margin-bottom: 6px;
+}
+.sc-tc-select {
+  flex: 1; border: 1.5px solid #E3EAF8; border-radius: 10px;
+  padding: 7px 10px; font-size: 13px; color: #0D1B3E;
+  background: #fff; outline: none; font-family: inherit;
+  -webkit-appearance: none;
+}
+.sc-tc-role {
+  width: 90px; border: 1.5px solid #E3EAF8; border-radius: 10px;
+  padding: 7px 6px; font-size: 11px; color: #546E7A;
+  background: #fff; outline: none; font-family: inherit;
+  -webkit-appearance: none; flex-shrink: 0;
+}
+.sc-tc-remove {
+  width: 32px; height: 32px; border-radius: 8px;
+  background: #FFEBEE; border: 1px solid #FFCDD2;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer; flex-shrink: 0; color: #C62828;
+  -webkit-tap-highlight-color: transparent;
+}
+.sc-tc-remove svg { width: 12px; height: 12px; }
+.sc-add-country-btn {
+  display: flex; align-items: center; gap: 6px;
+  width: 100%; padding: 10px 14px; border-radius: 12px;
+  background: #E3F2FD; border: 1.5px dashed #1565C0;
+  font-size: 13px; font-weight: 700; color: #1565C0;
+  cursor: pointer; margin-top: 4px;
+  -webkit-tap-highlight-color: transparent;
+  transition: background .12s;
+}
+.sc-add-country-btn svg { width: 14px; height: 14px; }
+.sc-add-country-btn:active { background: #BBDEFB; }
+
+/* ── SYMPTOM CHECKLIST ────────────────────────────────────────── */
+.sc-sym-count {
+  margin-left: auto; font-size: 11px; font-weight: 800;
+  color: #1565C0; background: #E3F2FD; padding: 2px 9px; border-radius: 8px;
+}
+.sc-sym-intro {
+  font-size: 12px; color: #78909C; line-height: 1.5;
+  margin-bottom: 10px; background: #F5F9FF; border-radius: 10px;
+  padding: 8px 12px; border: 1px solid #E3EAF8;
+}
+.sc-sym-group { margin-bottom: 10px; }
+.sc-sym-group-hdr {
+  display: flex; align-items: center; gap: 7px;
+  font-size: 10px; font-weight: 800; text-transform: uppercase;
+  letter-spacing: .7px; color: #546E7A; margin-bottom: 7px;
+}
+.sc-sym-group-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.sc-sym-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.sc-sym-card {
+  display: flex; align-items: center; gap: 7px;
+  padding: 8px 10px; border-radius: 11px;
+  border: 1.5px solid #E3EAF8; background: #F4F7FF;
+  cursor: pointer; -webkit-tap-highlight-color: transparent;
+  transition: all .1s cubic-bezier(.34,1.56,.64,1);
+}
+.sc-sym-card:active { transform: scale(.96); }
+.sc-sym-card--on {
+  background: #1565C0; border-color: #0D47A1;
+  box-shadow: 0 4px 14px rgba(21,101,192,.3);
+}
+.sc-sym-card--off {
+  background: #F5F5F5; border-color: #EEEEEE;
+}
+.sc-sym-indicator {
+  width: 18px; height: 18px; border-radius: 5px; flex-shrink: 0;
+  border: 1.5px solid #CFD8DC; background: #fff;
+  display: flex; align-items: center; justify-content: center;
+  transition: all .1s;
+}
+.sc-sym-card--on .sc-sym-indicator { background: rgba(255,255,255,.25); border-color: rgba(255,255,255,.5); }
+.sc-sym-indicator svg { width: 11px; height: 11px; }
+.sc-sym-name {
+  font-size: 11.5px; font-weight: 600; color: #546E7A;
+  line-height: 1.2; flex: 1; text-align: left;
+}
+.sc-sym-name--on { color: #fff; font-weight: 700; }
+.sc-sym-card--off .sc-sym-name { color: #B0BEC5; }
+
+/* Onset date inputs */
+.sc-onset-row {
+  display: flex; align-items: center; gap: 9px;
+  padding: 7px 12px; margin-top: 2px;
+  background: #FFF8E1; border-radius: 10px; border: 1px solid #FFE082;
+}
+.sc-onset-ic { width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.sc-onset-ic svg { width: 14px; height: 14px; }
+.sc-onset-body { flex: 1; }
+.sc-onset-lbl { font-size: 9.5px; font-weight: 700; color: #E65100; letter-spacing: .3px; display: block; margin-bottom: 2px; }
+.sc-onset-input {
+  border: 1.5px solid #FFE082; border-radius: 8px;
+  padding: 4px 8px; font-size: 13px; color: #0D1B3E;
+  background: #fff; outline: none; font-family: inherit;
+}
+.sc-onset-input:focus { border-color: #E65100; }
+
+/* ── VITALS TOGGLE ────────────────────────────────────────────── */
+.sc-vitals-toggle-hdr {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 11px 14px; margin-top: 10px;
+  background: #fff; border: 1px solid #E3EAF8; border-radius: 14px;
+  cursor: pointer; -webkit-tap-highlight-color: transparent;
+  transition: background .12s;
+}
+.sc-vitals-toggle-hdr:active { background: #F5F9FF; }
+.sc-vitals-toggle-left { display: flex; align-items: center; gap: 8px; }
+.sc-vitals-toggle-ic {
+  width: 28px; height: 28px; border-radius: 8px; background: #E3F2FD;
+  display: flex; align-items: center; justify-content: center;
+}
+.sc-vitals-toggle-ic svg { width: 14px; height: 14px; stroke: #1565C0; }
+.sc-vitals-toggle-lbl { font-size: 13px; font-weight: 700; color: #0D1B3E; }
+.sc-vitals-badge {
+  padding: 2px 7px; border-radius: 6px; font-size: 9px; font-weight: 700;
+  background: #ECEFF1; color: #78909C; border: 1px solid #E0E0E0;
+}
+.sc-vitals-chevron { width: 16px; height: 16px; stroke: #90A4AE; transition: transform .2s; }
+.sc-vitals-chevron--open { transform: rotate(180deg); }
+
+.sc-vitals-panel {
+  background: #fff; border: 1px solid #E3EAF8; border-radius: 14px;
+  padding: 14px; margin-top: 6px; display: flex; flex-direction: column; gap: 12px;
+}
+.sc-vitals-note {
+  font-size: 11px; color: #90A4AE; background: #F5F9FF;
+  border-radius: 8px; padding: 7px 10px; border: 1px solid #E3EAF8;
+}
+
+/* Vitals inputs */
+.sc-vt-row { display: flex; flex-direction: column; gap: 4px; }
+.sc-vt-row--half { flex: 1; }
+.sc-vt-pair { display: flex; gap: 10px; }
+.sc-vt-lbl { font-size: 9.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .5px; color: #90A4AE; }
+.sc-vt-inputs { display: flex; gap: 6px; }
+.sc-vt-num {
+  border: 1.5px solid #E3EAF8; border-radius: 10px;
+  padding: 7px 10px; font-size: 16px; font-weight: 700; color: #0D1B3E;
+  background: #FAFAFA; outline: none; font-family: inherit; width: 100%;
+}
+.sc-vt-num--short { max-width: 90px; }
+.sc-vt-num:focus  { border-color: #1565C0; background: #fff; }
+.sc-vt-unit {
+  border: 1.5px solid #E3EAF8; border-radius: 10px; padding: 7px 8px;
+  font-size: 14px; color: #546E7A; background: #F4F7FF;
+  outline: none; font-family: inherit; width: 60px; flex-shrink: 0;
+  -webkit-appearance: none;
+}
+.sc-vt-warn { font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 6px; }
+.sc-vt-warn--sm   { font-size: 10px; }
+.sc-vt-warn--warn { background: #FFF3E0; color: #E65100; }
+.sc-vt-warn--crit { background: #FFEBEE; color: #C62828; }
+
+/* Triage */
+.sc-triage-row { display: flex; gap: 6px; }
+.sc-triage-btn {
+  flex: 1; padding: 9px 4px; border-radius: 11px;
+  display: flex; flex-direction: column; align-items: center; gap: 3px;
+  border: 1.5px solid; cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: all .12s;
+}
+.sc-triage-btn--non_urgent { background: #F5F9FF; border-color: #BBDEFB; }
+.sc-triage-btn--non_urgent .sc-triage-lbl { color: #1565C0; }
+.sc-triage-btn--urgent     { background: #FFF3E0; border-color: #FFCC80; }
+.sc-triage-btn--urgent .sc-triage-lbl     { color: #E65100; }
+.sc-triage-btn--emergency  { background: #FFEBEE; border-color: #FFCDD2; }
+.sc-triage-btn--emergency .sc-triage-lbl  { color: #C62828; }
+.sc-triage-btn--active     { box-shadow: 0 0 0 3px rgba(21,101,192,.15); transform: translateY(-1px); }
+.sc-triage-lbl { font-size: 10.5px; font-weight: 800; text-transform: uppercase; letter-spacing: .3px; }
+.sc-triage-sub { font-size: 8.5px; color: #90A4AE; }
+
+/* Bool toggle */
+.sc-bool-row { display: flex; gap: 6px; }
+.sc-bool-btn {
+  padding: 6px 12px; border-radius: 10px; border: 1.5px solid #E3EAF8;
+  background: #F4F7FF; font-size: 12px; font-weight: 700; color: #546E7A;
+  cursor: pointer; transition: all .12s;
+}
+.sc-bool-btn--yes { background: #FFEBEE; border-color: #FFCDD2; color: #C62828; }
+
+/* ── EXPOSURES ────────────────────────────────────────────────── */
+.sc-exposure-intro {
+  font-size: 12px; color: #546E7A; line-height: 1.5;
+  background: #FFF8E1; border: 1px solid #FFE082;
+  border-radius: 10px; padding: 10px 12px; margin-bottom: 10px;
+}
+.sc-exposure-list { display: flex; flex-direction: column; gap: 10px; }
+
+.sc-exp-card {
+  display: flex; gap: 12px; align-items: flex-start;
+  background: #fff; border: 1px solid #E3EAF8;
+  border-radius: 16px; padding: 14px;
+}
+.sc-exp-num {
+  width: 24px; height: 24px; border-radius: 50%; background: #1565C0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 900; color: #fff; flex-shrink: 0; margin-top: 1px;
+}
+.sc-exp-body { flex: 1; }
+.sc-exp-question {
+  font-size: 13.5px; font-weight: 600; color: #0D1B3E;
+  line-height: 1.45; margin-bottom: 10px;
+}
+.sc-exp-btns { display: flex; gap: 8px; }
+.sc-exp-btn {
+  flex: 1; padding: 9px 6px; border-radius: 12px;
+  font-size: 13px; font-weight: 800; border: 2px solid;
+  cursor: pointer; text-align: center;
+  -webkit-tap-highlight-color: transparent;
+  transition: all .1s cubic-bezier(.34,1.56,.64,1);
+}
+.sc-exp-btn:active { transform: scale(.94); }
+
+.sc-exp-btn--yes    { background: #E8F5E9; border-color: #A5D6A7; color: #2E7D32; }
+.sc-exp-btn--yes.sc-exp-btn--active {
+  background: linear-gradient(145deg, #1B5E20, #2E7D32);
+  border-color: #1B5E20; color: #fff;
+  box-shadow: 0 4px 14px rgba(46,125,50,.35);
+}
+
+.sc-exp-btn--no     { background: #FFEBEE; border-color: #FFCDD2; color: #C62828; }
+.sc-exp-btn--no.sc-exp-btn--active {
+  background: linear-gradient(145deg, #B71C1C, #C62828);
+  border-color: #B71C1C; color: #fff;
+  box-shadow: 0 4px 14px rgba(198,40,40,.35);
+}
+
+.sc-exp-btn--unk    { background: #ECEFF1; border-color: #CFD8DC; color: #546E7A; }
+.sc-exp-btn--unk.sc-exp-btn--active {
+  background: #546E7A; border-color: #455A64; color: #fff;
+}
+
+.sc-exp-summary {
+  display: flex; align-items: center; gap: 8px;
+  margin-top: 10px; padding: 9px 12px; border-radius: 10px;
+  background: #FFF3E0; border: 1px solid #FFCC80;
+  font-size: 12px; color: #E65100;
+}
+.sc-exp-summary svg { width: 14px; height: 14px; flex-shrink: 0; }
+
+/* ── ANALYSIS ─────────────────────────────────────────────────── */
+.sc-insuff-warn {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 12px; border-radius: 10px;
+  background: #FFF3E0; border: 1px solid #FFCC80;
+  font-size: 12px; color: #E65100; margin-bottom: 8px;
+}
+.sc-insuff-warn svg { width: 14px; height: 14px; flex-shrink: 0; }
+
+.sc-flag-banner {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 14px; border-radius: 12px; margin-bottom: 6px;
+  background: linear-gradient(135deg, #B71C1C, #C62828);
+}
+.sc-flag-banner svg { width: 16px; height: 16px; flex-shrink: 0; }
+.sc-flag-txt { font-size: 12px; font-weight: 800; color: #fff; }
+
+.sc-empty-analysis {
+  display: flex; align-items: center; gap: 10px;
+  padding: 16px; background: #F4F7FF;
+  border: 1.5px dashed #CFD8DC; border-radius: 14px;
+  font-size: 12px; color: #B0BEC5;
+}
+.sc-empty-analysis svg { width: 22px; height: 22px; flex-shrink: 0; }
+
+/* Disease cards */
+.sc-disease-list { display: flex; flex-direction: column; gap: 7px; margin-bottom: 4px; }
+.sc-disease-card {
+  display: flex; align-items: center; gap: 10px;
+  background: #fff; border: 1px solid #E3EAF8;
+  border-radius: 14px; padding: 11px 13px;
+  border-left: 4px solid #90A4AE;
+}
+.sc-disease-card--very_high { border-left-color: #C62828; }
+.sc-disease-card--high      { border-left-color: #E65100; }
+.sc-disease-card--moderate  { border-left-color: #F9A825; }
+.sc-disease-card--low       { border-left-color: #1565C0; }
+.sc-disease-card--very_low  { border-left-color: #90A4AE; }
+
+.sc-dc-rank {
+  width: 26px; height: 26px; border-radius: 8px; flex-shrink: 0;
+  background: #ECEFF1; display: flex; align-items: center; justify-content: center;
+  font-size: 12px; font-weight: 900; color: #546E7A;
+}
+.sc-dc-rank--top { background: #FFEBEE; color: #C62828; }
+.sc-dc-body { flex: 1; min-width: 0; }
+.sc-dc-name { font-size: 13px; font-weight: 700; color: #0D1B3E; }
+.sc-dc-meta { display: flex; align-items: center; gap: 6px; margin-top: 3px; flex-wrap: wrap; }
+.sc-dc-score { font-size: 10px; font-weight: 700; color: #546E7A; }
+.sc-dc-band {
+  font-size: 9px; font-weight: 800; text-transform: uppercase; letter-spacing: .4px;
+  padding: 1px 6px; border-radius: 5px;
+}
+.sc-dc-band--very_high { background: #FFEBEE; color: #C62828; }
+.sc-dc-band--high      { background: #FFF3E0; color: #E65100; }
+.sc-dc-band--moderate  { background: #FFF8E1; color: #F9A825; }
+.sc-dc-band--low       { background: #E3F2FD; color: #1565C0; }
+.sc-dc-band--very_low  { background: #ECEFF1; color: #78909C; }
+.sc-dc-ihr  { font-size: 9px; font-weight: 700; color: #6A1B9A; background: #EDE7F6; padding: 1px 6px; border-radius: 5px; }
+.sc-dc-hallmarks { margin-top: 3px; display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.sc-dc-hlbl { font-size: 9px; font-weight: 700; color: #90A4AE; }
+.sc-dc-htag { font-size: 9px; background: #E3F2FD; color: #1565C0; padding: 1px 5px; border-radius: 4px; font-weight: 700; }
+.sc-dc-pct {
+  font-size: 16px; font-weight: 900; flex-shrink: 0; letter-spacing: -.5px;
+}
+.sc-dc-pct--very_high { color: #C62828; }
+.sc-dc-pct--high      { color: #E65100; }
+.sc-dc-pct--moderate  { color: #F9A825; }
+.sc-dc-pct--low       { color: #1565C0; }
+.sc-dc-pct--very_low  { color: #90A4AE; }
+
+/* Syndrome grid */
+.sc-syndrome-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.sc-syn-btn {
+  padding: 9px 4px; border-radius: 11px; border: 1.5px solid #E0E0E0;
+  background: #FAFAFA; text-align: center; cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: all .1s;
+}
+.sc-syn-btn:active { transform: scale(.95); }
+.sc-syn-code { font-size: 10px; font-weight: 900; letter-spacing: .2px; display: block; color: #546E7A; }
+.sc-syn-name { font-size: 8px; font-weight: 500; display: block; margin-top: 1px; color: #B0BEC5; line-height: 1.2; }
+.sc-syn-btn--active {
+  background: #E3F2FD; border-color: #1565C0;
+  box-shadow: 0 0 0 2px rgba(21,101,192,.12);
+}
+.sc-syn-btn--active .sc-syn-code { color: #0D47A1; }
+.sc-syn-btn--active .sc-syn-name { color: #1565C0; }
+.sc-syn-btn--danger { border-color: #FFCDD2; }
+.sc-syn-btn--danger .sc-syn-code { color: #C62828; }
+.sc-syn-btn--danger.sc-syn-btn--active { background: #FFEBEE; }
+
+/* Risk level */
+.sc-risk-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+.sc-risk-btn {
+  padding: 10px 4px; border-radius: 12px; border: 1.5px solid;
+  text-align: center; cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: all .12s;
+}
+.sc-risk-btn:active { transform: scale(.95); }
+.sc-risk-lbl { font-size: 10.5px; font-weight: 800; text-transform: uppercase; letter-spacing: .2px; display: block; }
+.sc-risk-sub { font-size: 8.5px; font-weight: 500; display: block; margin-top: 1px; }
+.sc-risk-btn--low      { background: #E8F5E9; border-color: #A5D6A7; }
+.sc-risk-btn--low .sc-risk-lbl      { color: #2E7D32; }
+.sc-risk-btn--low .sc-risk-sub      { color: #66BB6A; }
+.sc-risk-btn--medium   { background: #FFF8E1; border-color: #FFE082; }
+.sc-risk-btn--medium .sc-risk-lbl   { color: #F57F17; }
+.sc-risk-btn--medium .sc-risk-sub   { color: #FFA726; }
+.sc-risk-btn--high     { background: #FFF3E0; border-color: #FFCC80; }
+.sc-risk-btn--high .sc-risk-lbl     { color: #E65100; }
+.sc-risk-btn--high .sc-risk-sub     { color: #FFA726; }
+.sc-risk-btn--critical { background: #FFEBEE; border-color: #FFCDD2; }
+.sc-risk-btn--critical .sc-risk-lbl { color: #C62828; }
+.sc-risk-btn--critical .sc-risk-sub { color: #EF9A9A; }
+.sc-risk-btn--active   { box-shadow: 0 0 0 3px rgba(21,101,192,.18); transform: translateY(-1px); }
+
+/* Alert preview */
+.sc-alert-preview {
+  background: linear-gradient(135deg, #FFF8E1, #FFF3E0);
+  border: 2px solid #FFB300; border-radius: 16px; overflow: hidden; margin-top: 6px;
+}
+.sc-ap-hdr {
+  background: linear-gradient(135deg, #E65100, #F57C00);
+  padding: 11px 14px; display: flex; align-items: center; gap: 8px;
+}
+.sc-ap-hdr svg { width: 16px; height: 16px; flex-shrink: 0; }
+.sc-ap-title { font-size: 12px; font-weight: 800; color: #fff; flex: 1; }
+
+/* ── Notification verification panel ──────────────────────────── */
+.sc-sec-badge--auto { background: #E8F5E9; color: #2E7D32; border-color: #A5D6A7; }
+.sc-auto-hint {
+  display: flex; align-items: center; gap: 5px;
+  font-size: 11px; color: #2E7D32; background: #F1F8E9;
+  border: 1px solid #C8E6C9; border-radius: 6px;
+  padding: 6px 10px; margin-bottom: 8px;
+}
+.sc-verify-panel {
+  margin: 16px 0 8px;
+  border: 1.5px solid #1565C0;
+  border-radius: 10px;
+  overflow: hidden;
+  background: #fff;
+}
+.sc-verify-header {
+  display: flex; align-items: center; gap: 8px;
+  background: #1565C0; color: #fff; padding: 10px 14px;
+}
+.sc-verify-title { font-size: 12px; font-weight: 700; flex: 1; }
+.sc-verify-btn { background: rgba(255,255,255,0.2); color: #fff; border: 1px solid rgba(255,255,255,0.4); border-radius: 6px; padding: 4px 12px; font-size: 11px; font-weight: 600; cursor: pointer; }
+.sc-verify-btn:disabled { opacity: 0.6; cursor: default; }
+.sc-verify-btn--sync { background: rgba(255,255,255,0.35); }
+
+/* Sync result block */
+.sc-sync-result-block { border-top: 1px solid #E3F2FD; padding: 0 0 4px; }
+.sc-srb-title { font-size: 10px; color: #607D8B; padding: 6px 14px 2px; }
+.sc-srb-row { display: flex; align-items: baseline; gap: 6px; padding: 5px 14px; border-bottom: 1px solid #F5F5F5; font-size: 11px; }
+.sc-srb-row--ok      { background: #F1F8E9; }
+.sc-srb-row--fail    { background: #FFF3E0; }
+.sc-srb-row--skip    { background: #F5F5F5; }
+.sc-srb-row--pending { background: #E3F2FD; }
+.sc-srb-phase  { font-weight: 700; color: #37474F; min-width: 110px; flex-shrink: 0; }
+.sc-srb-status { font-weight: 800; min-width: 36px; text-transform: uppercase; font-size: 10px; }
+.sc-srb-row--ok   .sc-srb-status { color: #2E7D32; }
+.sc-srb-row--fail .sc-srb-status { color: #E65100; }
+.sc-srb-row--skip .sc-srb-status { color: #78909C; }
+.sc-srb-msg    { font-size: 10.5px; color: #455A64; flex: 1; word-break: break-all; }
+.sc-srb-error  { padding: 6px 14px; font-size: 11px; color: #C62828; background: #FFEBEE; font-weight: 600; }
+.sc-verify-idle { padding: 14px; font-size: 12px; color: #607D8B; text-align: center; }
+.sc-verify-error { padding: 10px 14px; font-size: 12px; color: #C62828; background: #FFEBEE; }
+.sc-verify-results { padding: 8px 0 0; }
+.sc-verify-row {
+  display: flex; align-items: flex-start; gap: 8px;
+  padding: 7px 14px; border-bottom: 1px solid #F0F0F0;
+}
+.sc-verify-row--pass { background: #F1F8E9; }
+.sc-verify-row--fail { background: #FFF3E0; }
+.sc-verify-icon { font-size: 13px; font-weight: 800; min-width: 14px; margin-top: 1px; }
+.sc-verify-row--pass .sc-verify-icon { color: #2E7D32; }
+.sc-verify-row--fail .sc-verify-icon { color: #E65100; }
+.sc-verify-body { flex: 1; min-width: 0; }
+.sc-verify-label { font-size: 11.5px; font-weight: 600; color: #212121; line-height: 1.3; }
+.sc-verify-detail { font-size: 10.5px; color: #546E7A; margin-top: 2px; word-break: break-all; }
+.sc-verify-summary {
+  margin: 8px 14px 10px; padding: 8px 12px; border-radius: 6px;
+  font-size: 12px; font-weight: 700; text-align: center;
+}
+.sc-verify-summary--ok  { background: #E8F5E9; color: #1B5E20; }
+.sc-verify-summary--warn { background: #FFF8E1; color: #E65100; }
+.sc-verify-raw {
+  margin: 4px 14px 10px; border: 1px solid #E0E0E0; border-radius: 6px; overflow: hidden;
+}
+.sc-verify-raw summary {
+  padding: 6px 10px; font-size: 11px; font-weight: 600; color: #455A64;
+  background: #F5F5F5; cursor: pointer; user-select: none;
+}
+.sc-verify-raw pre {
+  margin: 0; padding: 10px; font-size: 10px; color: #263238;
+  background: #FAFAFA; overflow-x: auto; max-height: 200px; overflow-y: auto;
+  white-space: pre-wrap; word-break: break-all;
+}
+.sc-ap-badge {
+  padding: 2px 8px; border-radius: 6px; background: rgba(255,255,255,.2);
+  border: 1px solid rgba(255,255,255,.3); font-size: 9px; font-weight: 800;
+  color: #fff; text-transform: uppercase; letter-spacing: .4px;
+}
+.sc-ap-body { padding: 11px 14px; display: flex; flex-direction: column; gap: 6px; }
+.sc-ap-row { display: flex; align-items: center; justify-content: space-between; }
+.sc-ap-k { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .4px; color: #78909C; }
+.sc-ap-v { font-size: 12px; font-weight: 700; color: #0D1B3E; }
+.sc-ap-v--warn { color: #E65100; }
+.sc-ap-target {
+  padding: 3px 9px; border-radius: 7px; font-size: 10.5px; font-weight: 800; border: 1.5px solid;
+}
+.sc-ap-target--district  { background: #FFF3E0; color: #E65100; border-color: #FFCC80; }
+.sc-ap-target--pheoc     { background: #EDE7F6; color: #6A1B9A; border-color: #CE93D8; }
+.sc-ap-target--national  { background: #FFEBEE; color: #C62828; border-color: #FFCDD2; }
+
+/* Actions */
+.sc-actions-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.sc-action-btn {
+  display: flex; align-items: center; gap: 7px;
+  padding: 9px 10px; border-radius: 11px;
+  border: 1.5px solid #E3EAF8; background: #F4F7FF;
+  font-size: 12px; font-weight: 600; color: #546E7A;
+  cursor: pointer; text-align: left;
+  -webkit-tap-highlight-color: transparent;
+  transition: all .1s;
+}
+.sc-action-btn:active { transform: scale(.96); }
+.sc-action-btn--active { background: #E8F5E9; border-color: #A5D6A7; color: #1B5E20; font-weight: 700; }
+.sc-action-ic {
+  width: 18px; height: 18px; border-radius: 5px; border: 1.5px solid #CFD8DC;
+  background: #fff; display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+}
+.sc-action-btn--active .sc-action-ic { background: #2E7D32; border-color: #1B5E20; }
+.sc-action-dot { width: 6px; height: 6px; border-radius: 50%; background: #CFD8DC; }
+.sc-action-ic svg { width: 11px; height: 11px; }
+
+/* Enforce warn */
+.sc-enforce-warn {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 12px; border-radius: 10px; margin-top: 6px;
+  background: #FFEBEE; border: 1.5px solid #FFCDD2;
+  font-size: 12px; color: #C62828;
+}
+.sc-enforce-warn svg { width: 14px; height: 14px; flex-shrink: 0; }
+
+/* Disposition */
+.sc-disp-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.sc-disp-btn {
+  display: flex; flex-direction: column; align-items: center; gap: 5px;
+  padding: 12px 8px; border-radius: 13px;
+  border: 1.5px solid #E3EAF8; background: #F4F7FF;
+  cursor: pointer; text-align: center;
+  -webkit-tap-highlight-color: transparent;
+  transition: all .1s;
+}
+.sc-disp-btn:active { transform: scale(.95); }
+.sc-disp-btn--active { background: #E8F5E9; border-color: #2E7D32; box-shadow: 0 0 0 2px rgba(46,125,50,.15); }
+.sc-disp-ic { width: 30px; height: 30px; border-radius: 9px; background: #E3EAF8; display: flex; align-items: center; justify-content: center; }
+.sc-disp-ic svg { width: 14px; height: 14px; stroke: #546E7A; }
+.sc-disp-btn--active .sc-disp-ic { background: #A5D6A7; }
+.sc-disp-btn--active .sc-disp-ic svg { stroke: #1B5E20; }
+.sc-disp-lbl { font-size: 11px; font-weight: 700; color: #546E7A; }
+.sc-disp-btn--active .sc-disp-lbl { color: #1B5E20; }
+
+/* Notes */
+.sc-notes-wrap { background: #fff; border: 1px solid #E3EAF8; border-radius: 14px; overflow: hidden; }
+.sc-notes-input {
+  width: 100%; padding: 12px 14px; border: none; outline: none;
+  font-size: 13.5px; color: #0D1B3E; font-family: inherit;
+  line-height: 1.55; resize: vertical; min-height: 90px; background: transparent;
+}
+.sc-notes-input::placeholder { color: #B0BEC5; }
+
+/* Follow-up */
+.sc-followup-row { display: flex; align-items: center; gap: 10px; margin-top: 8px; flex-wrap: wrap; }
+.sc-followup-toggle {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 14px; border-radius: 12px;
+  border: 1.5px solid #E3EAF8; background: #F4F7FF;
+  font-size: 13px; font-weight: 700; color: #546E7A;
+  cursor: pointer; -webkit-tap-highlight-color: transparent;
+  transition: all .12s;
+}
+.sc-followup-toggle--on { background: #E3F2FD; border-color: #1565C0; color: #0D47A1; }
+.sc-ft-indicator {
+  width: 16px; height: 16px; border-radius: 50%;
+  border: 2px solid #CFD8DC; background: #fff; flex-shrink: 0;
+  transition: all .12s;
+}
+.sc-followup-toggle--on .sc-ft-indicator { background: #1565C0; border-color: #0D47A1; }
+.sc-ft-lbl { font-size: 12.5px; }
+.sc-followup-level {
+  border: 1.5px solid #E3EAF8; border-radius: 10px;
+  padding: 7px 10px; font-size: 13px; color: #0D1B3E;
+  background: #fff; outline: none; font-family: inherit;
+  -webkit-appearance: none;
+}
+
+/* Suspected diseases list */
+.sc-sus-list { background: #fff; border: 1px solid #E3EAF8; border-radius: 14px; overflow: hidden; }
+.sc-sus-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 14px; border-bottom: 1px solid #F1F5FB;
+}
+.sc-sus-row:last-child { border-bottom: none; }
+.sc-sus-rank { width: 20px; height: 20px; border-radius: 6px; background: #E3F2FD; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 900; color: #0D47A1; flex-shrink: 0; }
+.sc-sus-name { flex: 1; font-size: 13px; font-weight: 600; color: #0D1B3E; text-transform: capitalize; }
+.sc-sus-conf { font-size: 12px; font-weight: 700; color: #1565C0; background: #E3F2FD; padding: 2px 7px; border-radius: 6px; }
+
+/* ── FOOTER ───────────────────────────────────────────────────── */
+.sc-footer { background: #fff; border-top: 1px solid #E3EAF8; }
+.sc-footer-inner {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 14px 10px; gap: 10px;
+  padding-bottom: max(10px, env(safe-area-inset-bottom));
+}
+.sc-nav-spacer { flex: 1; }
+
+.sc-nav-btn {
+  display: flex; align-items: center; gap: 6px;
+  height: 46px; border-radius: 14px; font-size: 14px; font-weight: 800;
+  cursor: pointer; border: none; padding: 0 20px;
+  -webkit-tap-highlight-color: transparent;
+  transition: all .12s cubic-bezier(.34,1.56,.64,1);
+}
+.sc-nav-btn:active { transform: scale(.97); }
+.sc-nav-btn:disabled { opacity: .5; cursor: not-allowed; transform: none; }
+.sc-nav-btn svg { width: 14px; height: 14px; flex-shrink: 0; }
+
+.sc-nav-btn--back {
+  background: #ECEFF1; color: #546E7A;
+}
+.sc-nav-btn--back svg { stroke: #546E7A; }
+
+.sc-nav-btn--next {
+  flex: 1; justify-content: center;
+  background: linear-gradient(135deg, #0D47A1, #1565C0);
+  color: #fff;
+  box-shadow: 0 4px 14px rgba(13,71,161,.35);
+}
+.sc-nav-btn--next svg { stroke: #fff; }
+
+.sc-nav-btn--analyse {
+  flex: 1; justify-content: center;
+  background: linear-gradient(135deg, #E65100, #F57C00);
+  color: #fff;
+  box-shadow: 0 4px 14px rgba(230,81,0,.35);
+}
+
+.sc-nav-btn--disposition {
+  flex: 1; justify-content: center;
+  background: linear-gradient(135deg, #1B5E20, #2E7D32);
+  color: #fff;
+  box-shadow: 0 4px 14px rgba(46,125,50,.35);
+}
+.sc-nav-btn--disposition:disabled { background: #ECEFF1; color: #90A4AE; box-shadow: none; }
+</style>
