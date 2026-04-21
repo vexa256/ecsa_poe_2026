@@ -50,7 +50,35 @@
           <span class="pr-stat-num">{{ unsyncedCount }}</span>
           <span class="pr-stat-lbl">Unsynced</span>
         </button>
+        <template v-if="quarantinedRecords.length">
+          <div class="pr-stat-div" />
+          <button class="pr-stat pr-stat--quarantine" @click="showQuarantinePanel = !showQuarantinePanel">
+            <span class="pr-stat-num">{{ quarantinedRecords.length }}</span>
+            <span class="pr-stat-lbl">Damaged</span>
+          </button>
+        </template>
       </div>
+
+      <!-- Quarantine banner -->
+      <transition name="pr-slide">
+        <div v-if="showQuarantinePanel && quarantinedRecords.length" class="pr-quarantine-banner">
+          <div class="pr-qb-header">
+            <span class="pr-qb-title">{{ quarantinedRecords.length }} Damaged Record{{ quarantinedRecords.length !== 1 ? 's' : '' }}</span>
+            <span class="pr-qb-sub">Failed to sync {{ QUARANTINE_MAX_ATTEMPTS }}+ times. Isolated to protect data integrity.</span>
+          </div>
+          <div class="pr-qb-list">
+            <div v-for="qr in quarantinedRecords" :key="qr.client_uuid" class="pr-qb-item">
+              <div class="pr-qb-info">
+                <span class="pr-qb-name">{{ qr.traveler_full_name || GENDER_LABELS[qr.gender] || 'Unknown' }}</span>
+                <span class="pr-qb-err">{{ qr.last_sync_error || 'Unknown error' }}</span>
+              </div>
+              <button class="pr-qb-retry" @click="retryQuarantined(qr)" :disabled="!isOnline" title="Retry">↻</button>
+              <button class="pr-qb-delete" @click="deleteQuarantined(qr)" title="Delete">✕</button>
+            </div>
+          </div>
+          <button class="pr-qb-purge" @click="purgeAllQuarantined">Purge All Damaged Records</button>
+        </div>
+      </transition>
 
       <!-- Charts toggle bar -->
       <div class="pr-charts-toggle" @click="chartsOpen = !chartsOpen">
@@ -95,7 +123,7 @@
             <div class="pr-chart-card">
               <span class="pr-chart-title">Gender Breakdown</span>
               <div v-if="serverStats?.by_gender" class="pr-gender-chart">
-                <template v-for="(g, key) in [{k:'MALE',l:'Male',c:'#1565C0'},{k:'FEMALE',l:'Female',c:'#C2185B'},{k:'OTHER',l:'Other',c:'#6A1B9A'},{k:'UNKNOWN',l:'Unknown',c:'#607D8B'}]" :key="g.k">
+                <template v-for="(g, key) in [{k:'MALE',l:'Male',c:'#1565C0'},{k:'FEMALE',l:'Female',c:'#C2185B'}]" :key="g.k">
                   <div class="pr-gbar-row">
                     <span class="pr-gbar-lbl">{{ g.l }}</span>
                     <div class="pr-gbar-track">
@@ -708,7 +736,8 @@
 //    • Stats refreshed from IDB counts (not by rescanning window)
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { ref, computed, reactive, onMounted, onUnmounted, toRaw, watch } from 'vue'
+import { ref, computed, reactive, onMounted, onUnmounted, toRaw, watch, nextTick } from 'vue'
+import { useRoute } from 'vue-router'
 import {
   IonPage, IonHeader, IonToolbar, IonButtons, IonMenuButton,
   IonButton, IonContent, IonIcon, IonSpinner,
@@ -723,13 +752,25 @@ import {
   barChartOutline, chevronUpOutline,
 } from 'ionicons/icons'
 import {
-  dbGet, dbGetByIndex, dbPut, safeDbPut, dbCountIndex,
+  dbGet, dbGetByIndex, dbPut, dbDelete, safeDbPut, dbCountIndex,
   isoNow, STORE, SYNC, APP,
 } from '@/services/poeDB'
 
 // ─── AUTH ─────────────────────────────────────────────────────────────────────
 function getAuth() { return JSON.parse(sessionStorage.getItem('AUTH_DATA') ?? 'null') ?? {} }
 const auth = ref(getAuth())
+const route = useRoute()
+
+let _deepLinkedUuid = null
+async function tryDeepLinkOpen() {
+  const openUuid = String(route.query?.open || '').trim()
+  if (!openUuid || _deepLinkedUuid === openUuid) return
+  _deepLinkedUuid = openUuid
+  await nextTick()
+  let item = allItems.value.find(i => i.client_uuid === openUuid)
+  if (!item) item = await dbGet(STORE.PRIMARY_SCREENINGS, openUuid).catch(() => null)
+  if (item) openDetail(item)
+}
 
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
 const STATUS_TABS = [
@@ -737,9 +778,10 @@ const STATUS_TABS = [
   { v: 'COMPLETED', label: 'Completed', bc: 'pr-tb--ok'   },
   { v: 'VOIDED',    label: 'Voided',    bc: 'pr-tb--void' },
 ]
-const GENDERS      = [{ v:'MALE',label:'Male' },{ v:'FEMALE',label:'Female' },{ v:'OTHER',label:'Other' },{ v:'UNKNOWN',label:'Unknown' }]
-const GENDER_LABELS= { MALE:'Male', FEMALE:'Female', OTHER:'Other', UNKNOWN:'Unknown' }
-const GENDER_ICONS = { MALE:'♂', FEMALE:'♀', OTHER:'⚥', UNKNOWN:'?' }
+const GENDERS      = [{ v:'MALE',label:'Male' },{ v:'FEMALE',label:'Female' }]
+// Maps include legacy values as fallback for existing records, but UI only offers MALE/FEMALE
+const GENDER_LABELS= { MALE:'Male', FEMALE:'Female', OTHER:'—', UNKNOWN:'—' }
+const GENDER_ICONS = { MALE:'♂', FEMALE:'♀', OTHER:'?', UNKNOWN:'?' }
 const SYNC_TABS    = [{ v:'SYNCED',label:'Synced' },{ v:'UNSYNCED',label:'Pending' },{ v:'FAILED',label:'Failed' }]
 const SYNC_LABELS  = { SYNCED:'Synced', UNSYNCED:'Pending', FAILED:'Failed' }
 const STATUS_LABELS= { OPEN:'Open', IN_PROGRESS:'In Progress', DISPOSITIONED:'Dispositioned', CLOSED:'Closed' }
@@ -765,10 +807,20 @@ const LAST_SYNC_KEY    = 'pr_last_server_sync' // localStorage cursor key
 
 // Memory window — the currently visible slice. NEVER exceeds MAX_WINDOW.
 const allItems       = ref([])
+// Quarantined records — sync_attempt_count >= QUARANTINE_MAX_ATTEMPTS
+const quarantinedRecords = ref([])
+const showQuarantinePanel = ref(false)
+const QUARANTINE_MAX_ATTEMPTS = 4
 
-// IDB-derived counts — O(1) index operations, read ZERO record bytes
-const idbTotalCount  = ref(0)
-const idbUnsyncedCount= ref(0)
+// IDB-derived counts — full scan scoped to poe_code
+const idbTotalCount    = ref(0)
+const idbUnsyncedCount = ref(0)
+// Per-status counts from full IDB scan (not window)
+const idbStatusCounts  = ref({ COMPLETED: 0, VOIDED: 0 })
+// Per-category counts from full IDB scan
+const idbSymptomaticCount = ref(0)
+const idbReferralCount    = ref(0)
+const idbFeverCount       = ref(0)
 
 // Pagination
 const idbPageOffset  = ref(0)
@@ -820,13 +872,11 @@ let searchDebounce   = null
 // idbTotalCount and idbUnsyncedCount come from O(1) IDB index count queries.
 // Symptomatic/referral/fever stats come from serverStats (covers all records, not just window).
 // Fallback to window counts only when serverStats not yet loaded.
-const totalCount       = computed(() => serverStats.value?.all_time?.total  ?? idbTotalCount.value)
-const symptomaticCount = computed(() => serverStats.value?.windowed?.total_symptomatic ?? allItems.value.filter(i=>i.symptoms_present&&i.record_status!=='VOIDED').length)
-const referralCount    = computed(() => serverStats.value?.windowed?.referrals_created ?? allItems.value.filter(i=>i.referral_created&&i.record_status!=='VOIDED').length)
-const feverCount       = computed(() => serverStats.value?.temperature?.fever_count ?? allItems.value.filter(i=>{
-  const c = i.temperature_c ?? (i.temperature_unit==='F'?(i.temperature_value-32)*5/9:i.temperature_value)
-  return c!=null && c>=37.5
-}).length)
+// Stats: use full IDB scan counts (accurate across all records, not just 300-item window)
+const totalCount       = computed(() => idbTotalCount.value)
+const symptomaticCount = computed(() => idbSymptomaticCount.value)
+const referralCount    = computed(() => idbReferralCount.value)
+const feverCount       = computed(() => idbFeverCount.value)
 const unsyncedCount    = computed(() => idbUnsyncedCount.value)
 
 const syncPillClass = computed(() => {
@@ -909,8 +959,10 @@ const displayItems = computed(() => {
 })
 
 function tabCount(v) {
-  const n = allItems.value.filter(i=>i.record_status===v).length
-  return n||null
+  if (!v) return null
+  // Use full-dataset counts, not the 300-item window
+  const count = idbStatusCounts.value[v] || 0
+  return count || null
 }
 
 // ─── HELPERS ─────────────────────────────────────────────────────────────────
@@ -928,21 +980,50 @@ function fmtDT(dt) {
 function sympClass(item) { if(item.record_status==='VOIDED')return'pr-card--voided';return item.symptoms_present?'pr-card--sym':'pr-card--asym' }
 function tempChipClass(tempC,flag) { if(flag==='CRITICAL')return'pr-temp-chip--critical';if(flag==='HIGH')return'pr-temp-chip--fever';if(flag==='LOW')return'pr-temp-chip--low';return'pr-temp-chip--normal' }
 function tempCardClass(tempC,flag) { if(flag==='CRITICAL')return'pr-vital--critical';if(flag==='HIGH')return'pr-vital--fever';if(flag==='LOW')return'pr-vital--low';if(tempC!==null)return'pr-vital--normal';return'' }
-function genderPct(key) { if(!serverStats.value?.by_gender)return 0;const g=serverStats.value.by_gender;const total=(g.MALE||0)+(g.FEMALE||0)+(g.OTHER||0)+(g.UNKNOWN||0);return total?Math.round(((g[key]||0)/total)*100):0 }
+function genderPct(key) { if(!serverStats.value?.by_gender)return 0;const g=serverStats.value.by_gender;const total=(g.MALE||0)+(g.FEMALE||0);return total?Math.round(((g[key]||0)/total)*100):0 }
 function sparkPoints(series,field) { if(!series?.length)return'';const vals=series.map(d=>d[field]||0);const max=Math.max(...vals,1);const W=210,H=60,PAD=6;return series.map((d,i)=>{const x=PAD+(i/Math.max(series.length-1,1))*(W-PAD*2);const y=H-PAD-((d[field]||0)/max)*(H-PAD*2);return`${x.toFixed(1)},${y.toFixed(1)}`}).join(' ') }
 function sparkDots(series,field) { if(!series?.length)return[];const vals=series.map(d=>d[field]||0);const max=Math.max(...vals,1);const W=210,H=60,PAD=6;return series.map((d,i)=>({x:PAD+(i/Math.max(series.length-1,1))*(W-PAD*2),y:H-PAD-((d[field]||0)/max)*(H-PAD*2)})) }
 
-// ─── IDB STATS — O(1) COUNT QUERIES ──────────────────────────────────────────
+// ─── IDB STATS — FULL SCAN SCOPED TO POE ─────────────────────────────────────
+// BUG FIX: Previously used dbCountIndex(sync_status) which counted ALL POEs.
+// Now does a full IDB scan scoped to poe_code for accurate breakdowns.
 async function refreshIdbStats() {
   const poeCode = auth.value?.poe_code||''
   if (!poeCode) return
   try {
-    idbTotalCount.value   = await dbCountIndex(STORE.PRIMARY_SCREENINGS, 'poe_code', poeCode)
-    const [u, f] = await Promise.all([
-      dbCountIndex(STORE.PRIMARY_SCREENINGS, 'sync_status', SYNC.UNSYNCED),
-      dbCountIndex(STORE.PRIMARY_SCREENINGS, 'sync_status', SYNC.FAILED),
-    ])
-    idbUnsyncedCount.value = u + f
+    const allPoeRecords = await dbGetByIndex(STORE.PRIMARY_SCREENINGS, 'poe_code', poeCode)
+    const live = allPoeRecords.filter(r => !r.deleted_at && (r.sync_attempt_count || 0) < QUARANTINE_MAX_ATTEMPTS)
+
+    idbTotalCount.value      = live.length
+    idbUnsyncedCount.value   = live.filter(r => r.sync_status === SYNC.UNSYNCED || r.sync_status === SYNC.FAILED).length
+    idbSymptomaticCount.value = live.filter(r => r.symptoms_present && r.record_status !== 'VOIDED').length
+    idbReferralCount.value   = live.filter(r => r.referral_created && r.record_status !== 'VOIDED').length
+    idbFeverCount.value      = live.filter(r => {
+      const c = r.temperature_unit === 'F' ? (r.temperature_value - 32) * 5/9 : r.temperature_value
+      return c != null && c >= 37.5
+    }).length
+
+    idbStatusCounts.value = {
+      COMPLETED: live.filter(r => r.record_status === 'COMPLETED').length,
+      VOIDED:    live.filter(r => r.record_status === 'VOIDED').length,
+    }
+
+    // Consistency guard: stats must never show fewer than what's displayed
+    const displayCount = allItems.value.length
+    if (idbTotalCount.value < displayCount) {
+      idbTotalCount.value = displayCount
+      idbSymptomaticCount.value = allItems.value.filter(i => i.symptoms_present && i.record_status !== 'VOIDED').length
+      idbReferralCount.value = allItems.value.filter(i => i.referral_created && i.record_status !== 'VOIDED').length
+      idbFeverCount.value = allItems.value.filter(i => {
+        const c = i.temperature_c ?? (i.temperature_unit === 'F' ? (i.temperature_value - 32) * 5/9 : i.temperature_value)
+        return c != null && c >= 37.5
+      }).length
+      idbUnsyncedCount.value = allItems.value.filter(i => i.sync_status === SYNC.UNSYNCED || i.sync_status === SYNC.FAILED).length
+      idbStatusCounts.value = {
+        COMPLETED: allItems.value.filter(i => i.record_status === 'COMPLETED').length,
+        VOIDED:    allItems.value.filter(i => i.record_status === 'VOIDED').length,
+      }
+    }
   } catch (e) { console.warn('[PR] refreshIdbStats', e?.message) }
 }
 
@@ -955,7 +1036,7 @@ async function readIdbPage(offset=0) {
   if (!poeCode) return []
   try {
     const all = await dbGetByIndex(STORE.PRIMARY_SCREENINGS, 'poe_code', poeCode)
-    const valid = all.filter(r=>!r.deleted_at)
+    const valid = all.filter(r => !r.deleted_at && (r.sync_attempt_count || 0) < QUARANTINE_MAX_ATTEMPTS)
     valid.sort((a,b)=>new Date(b.captured_at||0)-new Date(a.captured_at||0))
     return valid.slice(offset, offset+IDB_PAGE_SIZE).map(normaliseIdbRecord)
   } catch (e) { console.warn('[PR] readIdbPage', e?.message); return [] }
@@ -1022,6 +1103,60 @@ function tFlag(tempC) {
   return'NORMAL'
 }
 
+// ─── QUARANTINE ENGINE ────────────────────────────────────────────────────────
+// Scans IDB for records with sync_attempt_count >= QUARANTINE_MAX_ATTEMPTS.
+// Quarantined records are excluded from the main list and stats.
+// Primary screening does NOT purge records without traveler names — names are optional.
+async function scanForDamagedRecords() {
+  try {
+    const poeCode = auth.value?.poe_code || ''
+    if (!poeCode) return
+    const failedRecords = await dbGetByIndex(STORE.PRIMARY_SCREENINGS, 'sync_status', SYNC.FAILED)
+    const damaged = failedRecords.filter(r =>
+      (r.sync_attempt_count || 0) >= QUARANTINE_MAX_ATTEMPTS &&
+      r.poe_code === poeCode
+    )
+    quarantinedRecords.value = damaged.map(normaliseIdbRecord)
+    if (damaged.length > 0) {
+      const qUuids = new Set(damaged.map(d => d.client_uuid))
+      allItems.value = allItems.value.filter(i => !qUuids.has(i.client_uuid))
+    }
+  } catch (e) {
+    console.warn('[PR] scanForDamagedRecords error', e?.message)
+  }
+}
+
+async function retryQuarantined(qr) {
+  if (!isOnline.value) { showToast('Device is offline.', 'warning'); return }
+  try {
+    const rec = await dbGet(STORE.PRIMARY_SCREENINGS, qr.client_uuid)
+    if (!rec) { showToast('Record not found.', 'warning'); return }
+    await safeDbPut(STORE.PRIMARY_SCREENINGS, toPlain({
+      ...rec, sync_status: SYNC.FAILED, sync_attempt_count: 0,
+      last_sync_error: null, updated_at: isoNow(),
+    }))
+    quarantinedRecords.value = quarantinedRecords.value.filter(q => q.client_uuid !== qr.client_uuid)
+    await reload()
+    showToast('Record returned to sync queue.', 'success')
+  } catch (e) { showToast(`Retry error: ${e?.message}`, 'danger') }
+}
+
+async function deleteQuarantined(qr) {
+  try {
+    await dbDelete(STORE.PRIMARY_SCREENINGS, qr.client_uuid)
+    quarantinedRecords.value = quarantinedRecords.value.filter(q => q.client_uuid !== qr.client_uuid)
+    await refreshIdbStats()
+    showToast('Damaged record deleted.', 'success')
+  } catch (e) { showToast(`Delete error: ${e?.message}`, 'danger') }
+}
+
+async function purgeAllQuarantined() {
+  const count = quarantinedRecords.value.length
+  for (const qr of [...quarantinedRecords.value]) { await deleteQuarantined(qr) }
+  showToast(`${count} damaged record${count !== 1 ? 's' : ''} purged.`, 'success')
+  showQuarantinePanel.value = false
+}
+
 // ─── SERVER FETCH ─────────────────────────────────────────────────────────────
 async function fetchFromServer(pg=1, updatedAfter=null) {
   const userId=auth.value?.id
@@ -1055,6 +1190,8 @@ async function writeServerItemsToIdb(serverItems) {
     try {
       const existing = await dbGet(STORE.PRIMARY_SCREENINGS, s.client_uuid)
       const incomingVer = s.record_version??1
+      // Don't overwrite quarantined records — would reset sync_attempt_count
+      if (existing && (existing.sync_attempt_count || 0) >= QUARANTINE_MAX_ATTEMPTS) continue
       if (!existing) {
         await dbPut(STORE.PRIMARY_SCREENINGS, toPlain({
           client_uuid:            s.client_uuid,
@@ -1144,9 +1281,10 @@ async function writeServerItemsToIdb(serverItems) {
 
 // ─── MERGE INTO MEMORY WINDOW ─────────────────────────────────────────────────
 function mergeIntoWindow(serverItems) {
+  const qUuids = new Set(quarantinedRecords.value.map(q => q.client_uuid))
   const byUuid = new Map(allItems.value.map(i=>[i.client_uuid,i]))
   for (const s of serverItems) {
-    if (!s.client_uuid) continue
+    if (!s.client_uuid || qUuids.has(s.client_uuid)) continue
     const existing = byUuid.get(s.client_uuid)
     const tC = s.temperature_c??(s.temperature_unit==='F'?(s.temperature_value-32)*5/9:s.temperature_value)
     byUuid.set(s.client_uuid, {
@@ -1212,28 +1350,35 @@ async function load() {
   hasMoreIdb.value=true; hasMoreServer.value=true
 
   try {
-    // Phase 1: IDB stats + first page — instant, works offline
-    const [idbPage] = await Promise.all([readIdbPage(0), refreshIdbStats()])
+    // Phase 1: Scan for damaged records FIRST (quarantine at 4+ failed attempts)
+    await scanForDamagedRecords()
+
+    // Phase 2: Read first IDB page (instant, works offline)
+    const idbPage = await readIdbPage(0)
     if (idbPage.length>0) {
       allItems.value=idbPage; idbPageOffset.value=IDB_PAGE_SIZE
       hasMoreIdb.value=(idbPage.length===IDB_PAGE_SIZE)
       loading.value=false
     }
 
-    // Phase 2: server page 1 (if online)
+    // Phase 3: Compute stats from IDB (after quarantine scan, after page read)
+    await refreshIdbStats()
+
+    // Phase 4: Server page 1 (if online)
     if (isOnline.value) {
       const data = await fetchFromServer(1)
       if (data) {
         totalOnServer.value=data.total||0
         hasMoreServer.value=(data.page??1)<(data.pages??1)
         serverPage.value=2
-        writeServerItemsToIdb(data.items||[]).catch(()=>{})
+        await writeServerItemsToIdb(data.items||[])
         mergeIntoWindow(data.items||[])
         localStorage.setItem(LAST_SYNC_KEY, isoNow())
-        // Stats + trend in background (non-blocking)
+        // Recompute stats AFTER write-through so counts are consistent
+        await refreshIdbStats()
+        // Stats + trend in background (non-blocking, for charts only)
         fetchServerStats().catch(()=>{})
         fetchServerTrend().catch(()=>{})
-        refreshIdbStats().catch(()=>{})
       }
     }
   } finally { loading.value=false }
@@ -1288,9 +1433,10 @@ async function backgroundServerSync(debounceMs=0) {
       if (!data?.items?.length) return
       await writeServerItemsToIdb(data.items)
       mergeIntoWindow(data.items)
+      localStorage.setItem(LAST_SYNC_KEY, isoNow())
+      await scanForDamagedRecords()
       await refreshIdbStats()
       fetchServerStats().catch(()=>{})
-      localStorage.setItem(LAST_SYNC_KEY, isoNow())
       console.log(`[PR] Background sync: ${data.items.length} records updated`)
     } catch(e){ console.warn('[PR] backgroundServerSync',e?.message) }
   }, debounceMs)
@@ -1438,11 +1584,14 @@ async function syncOneRecord(item) {
 }
 
 async function markFailed(uuid,rec,msg) {
-  await safeDbPut(STORE.PRIMARY_SCREENINGS,toPlain({...rec,sync_status:SYNC.FAILED,last_sync_error:msg,sync_attempt_count:(rec.sync_attempt_count||0)+1,updated_at:isoNow()}))
+  const newAttemptCount = (rec.sync_attempt_count||0)+1
+  await safeDbPut(STORE.PRIMARY_SCREENINGS,toPlain({...rec,sync_status:SYNC.FAILED,last_sync_error:msg,sync_attempt_count:newAttemptCount,updated_at:isoNow()}))
   const idx=allItems.value.findIndex(i=>i.client_uuid===uuid)
-  if(idx!==-1){allItems.value[idx]={...allItems.value[idx],sync_status:SYNC.FAILED,last_sync_error:msg};allItems.value=[...allItems.value]}
-  if(detailRecord.value?.client_uuid===uuid)detailRecord.value={...detailRecord.value,sync_status:SYNC.FAILED,last_sync_error:msg}
+  if(idx!==-1){allItems.value[idx]={...allItems.value[idx],sync_status:SYNC.FAILED,last_sync_error:msg,sync_attempt_count:newAttemptCount};allItems.value=[...allItems.value]}
+  if(detailRecord.value?.client_uuid===uuid)detailRecord.value={...detailRecord.value,sync_status:SYNC.FAILED,last_sync_error:msg,sync_attempt_count:newAttemptCount}
   await refreshIdbStats()
+  // Check if this record should now be quarantined
+  await scanForDamagedRecords()
 }
 
 async function syncAllPending() {
@@ -1491,7 +1640,7 @@ onMounted(()=>{
   auth.value=getAuth()
   window.addEventListener('online',  onOnline)
   window.addEventListener('offline', onOffline)
-  load()
+  load().then(() => tryDeepLinkOpen())
   // Background poll: incremental sync every 60s. NOT a full reload.
   autoRefreshTimer=setInterval(()=>{
     if(isOnline.value&&!loading.value&&!syncing.value) backgroundServerSync()
@@ -1502,6 +1651,7 @@ onIonViewWillEnter(()=>{
   auth.value=getAuth()
   reload()
   if(isOnline.value) backgroundServerSync(200)
+  tryDeepLinkOpen()
 })
 
 onUnmounted(()=>{
@@ -1555,7 +1705,24 @@ onUnmounted(()=>{
 .pr-stat--ref .pr-stat-num  { color:#FFD93D; }
 .pr-stat--fever .pr-stat-num { color:#FFA726; }
 .pr-stat--unsynced .pr-stat-num { color:#63B3ED; }
+.pr-stat--quarantine .pr-stat-num { color:#CE93D8; }
 .pr-stat-div { width:1px; height:28px; background:rgba(255,255,255,.12); margin:auto 0; }
+
+/* ── QUARANTINE BANNER ───────────────────────────────────────────────── */
+.pr-quarantine-banner { background:linear-gradient(135deg, #4A1942, #2D1B3D); padding:12px; border-bottom:2px solid #CE93D8; }
+.pr-qb-header { margin-bottom:8px; }
+.pr-qb-title { display:block; font-size:13px; font-weight:800; color:#E1BEE7; }
+.pr-qb-sub   { display:block; font-size:10px; color:rgba(225,190,231,.6); margin-top:2px; }
+.pr-qb-list  { display:flex; flex-direction:column; gap:6px; margin-bottom:10px; }
+.pr-qb-item  { display:flex; align-items:center; gap:8px; padding:8px 10px; background:rgba(255,255,255,.06); border-radius:8px; border:1px solid rgba(206,147,216,.2); }
+.pr-qb-info  { flex:1; min-width:0; }
+.pr-qb-name  { display:block; font-size:12px; font-weight:700; color:#E1BEE7; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.pr-qb-err   { display:block; font-size:10px; color:#EF9A9A; margin-top:1px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.pr-qb-retry, .pr-qb-delete { width:28px; height:28px; border-radius:6px; border:1px solid rgba(206,147,216,.3); background:rgba(255,255,255,.08); display:flex; align-items:center; justify-content:center; cursor:pointer; font-size:14px; flex-shrink:0; }
+.pr-qb-retry { color:#81C784; }
+.pr-qb-delete { color:#EF9A9A; }
+.pr-qb-retry:disabled, .pr-qb-delete:disabled { opacity:.4; cursor:not-allowed; }
+.pr-qb-purge { width:100%; padding:8px; border-radius:6px; border:1.5px solid #EF9A9A; background:transparent; color:#EF9A9A; font-size:11px; font-weight:700; cursor:pointer; }
 
 /* ── CONTROLS ─────────────────────────────────────────────────────────── */
 .pr-controls { background:#fff; border-bottom:1.5px solid #E8EDF5; }

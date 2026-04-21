@@ -107,6 +107,278 @@ CREATE TABLE `alerts` (
 -- --------------------------------------------------------
 
 --
+-- ╔══════════════════════════════════════════════════════════════════════╗
+-- ║  AGGREGATED DATA — COUNTRY-CUSTOMIZABLE TEMPLATES                    ║
+-- ╚══════════════════════════════════════════════════════════════════════╝
+-- Each country defines ONE active template (version-controlled).
+-- Templates are made of columns (core + custom). Submissions write their
+-- data into aggregated_submission_values keyed by column_key, so the
+-- existing aggregated_submissions table stays intact for backwards compat.
+--
+-- WHO MAY MODIFY:
+--   NATIONAL_ADMIN  → any country's templates
+--   POE_ADMIN       → read-only (templates are country-wide, not POE-wide)
+--   Non-admin roles → read-only when submitting; cannot toggle columns.
+--
+-- DOWNSTREAM:
+--   aggregated_template_columns.dashboard_visible / report_visible / aggregation_fn
+--   drive the dashboards & reports generator. Every enabled column must
+--   carry valid aggregation_fn so dashboards can roll it up.
+-- --------------------------------------------------------
+
+CREATE TABLE `aggregated_templates` (
+  `id`             bigint UNSIGNED NOT NULL,
+  `country_code`   varchar(10) NOT NULL,
+  `template_name`  varchar(120) NOT NULL,
+  `template_code`  varchar(60) NOT NULL COMMENT 'Stable machine code, unique per country',
+  `description`    varchar(500) DEFAULT NULL,
+  `version`        int UNSIGNED NOT NULL DEFAULT '1',
+  `is_active`      tinyint(1) NOT NULL DEFAULT '0' COMMENT 'Only one active template per country',
+  `is_default`     tinyint(1) NOT NULL DEFAULT '0' COMMENT 'System-seeded default (WHO baseline)',
+  `locked`         tinyint(1) NOT NULL DEFAULT '0' COMMENT '1 = no edits permitted (published/signed-off)',
+  `metadata`       json DEFAULT NULL COMMENT 'Free-form metadata (tags, custom settings)',
+  `created_by_user_id` bigint UNSIGNED NOT NULL,
+  `updated_by_user_id` bigint UNSIGNED DEFAULT NULL,
+  `locked_by_user_id`  bigint UNSIGNED DEFAULT NULL,
+  `locked_at`      datetime DEFAULT NULL,
+  `deleted_at`     datetime DEFAULT NULL,
+  `created_at`     datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at`     datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `aggregated_templates_country_code_unique` (`country_code`, `template_code`),
+  KEY `aggregated_templates_active_idx`  (`country_code`, `is_active`),
+  KEY `aggregated_templates_default_idx` (`is_default`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+-- Columns that make up a template. Data types + validations are enforced
+-- both in the Vue form (UI) and at server submission validation.
+--   category:    CORE | GENDER | AGE | SYMPTOMS | DISEASE | TRAVEL | VACCINE | LAB | CUSTOM
+--   data_type:   INTEGER | DECIMAL | TEXT | BOOLEAN | DATE | PERCENT | SELECT
+--   aggregation: SUM | AVG | MIN | MAX | COUNT | LATEST | NONE
+CREATE TABLE `aggregated_template_columns` (
+  `id`            bigint UNSIGNED NOT NULL,
+  `template_id`   bigint UNSIGNED NOT NULL,
+  `column_key`    varchar(60) NOT NULL COMMENT 'Machine name; unique within a template',
+  `column_label`  varchar(160) NOT NULL,
+  `category`      varchar(40) NOT NULL DEFAULT 'CUSTOM',
+  `data_type`     enum('INTEGER','DECIMAL','TEXT','BOOLEAN','DATE','PERCENT','SELECT') NOT NULL DEFAULT 'INTEGER',
+  `is_required`   tinyint(1) NOT NULL DEFAULT '0',
+  `is_enabled`    tinyint(1) NOT NULL DEFAULT '1',
+  `is_core`       tinyint(1) NOT NULL DEFAULT '0' COMMENT '1 = required by system (cannot be deleted)',
+  `default_value` varchar(120) DEFAULT NULL,
+  `min_value`     decimal(14,4) DEFAULT NULL,
+  `max_value`     decimal(14,4) DEFAULT NULL,
+  `select_options` json DEFAULT NULL COMMENT 'For data_type=SELECT, array of option strings',
+  `validation_rules` json DEFAULT NULL COMMENT 'Optional JSON: { min_value, max_value, regex, required_if: {col:val} }',
+  `display_order` int UNSIGNED NOT NULL DEFAULT '0',
+  `placeholder`   varchar(160) DEFAULT NULL,
+  `help_text`     varchar(500) DEFAULT NULL,
+  `dashboard_visible` tinyint(1) NOT NULL DEFAULT '1' COMMENT 'Show in dashboards',
+  `report_visible`    tinyint(1) NOT NULL DEFAULT '1' COMMENT 'Include in exported reports',
+  `aggregation_fn`    enum('SUM','AVG','MIN','MAX','COUNT','LATEST','NONE') NOT NULL DEFAULT 'SUM',
+  `created_by_user_id` bigint UNSIGNED NOT NULL,
+  `updated_by_user_id` bigint UNSIGNED DEFAULT NULL,
+  `deleted_at`    datetime DEFAULT NULL,
+  `created_at`    datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at`    datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `agg_tpl_col_unique` (`template_id`, `column_key`),
+  KEY `agg_tpl_col_template_idx` (`template_id`, `display_order`),
+  KEY `agg_tpl_col_enabled_idx`  (`is_enabled`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+-- Holds the actual submitted values per column per submission.
+-- Two storage columns (value_numeric + value_text) + value_json for rare cases.
+-- aggregated_submissions.id still carries the fixed/legacy columns; values beyond
+-- those fixed columns come from this table. Dashboards MUST JOIN both.
+CREATE TABLE `aggregated_submission_values` (
+  `id`            bigint UNSIGNED NOT NULL,
+  `submission_id` bigint UNSIGNED NOT NULL,
+  `template_id`   bigint UNSIGNED NOT NULL,
+  `template_column_id` bigint UNSIGNED NOT NULL,
+  `column_key`    varchar(60) NOT NULL COMMENT 'Denormalised for dashboard joins',
+  `value_numeric` decimal(14,4) DEFAULT NULL,
+  `value_text`    varchar(500) DEFAULT NULL,
+  `value_json`    json DEFAULT NULL,
+  `created_at`    datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at`    datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `agg_sub_val_unique` (`submission_id`, `column_key`),
+  KEY `agg_sub_val_submission_idx` (`submission_id`),
+  KEY `agg_sub_val_template_idx`   (`template_id`, `column_key`),
+  KEY `agg_sub_val_key_idx`        (`column_key`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+-- --------------------------------------------------------
+
+--
+-- ╔══════════════════════════════════════════════════════════════════════╗
+-- ║  POE NOTIFICATION CONTACTS — who gets emailed at each level          ║
+-- ╚══════════════════════════════════════════════════════════════════════╝
+-- For any alert or follow-up event at a POE, we fan out to the contacts
+-- registered for that POE at the relevant level, honouring the receives_*
+-- flags (risk level + event type). escalates_to_contact_id defines the
+-- escalation chain when a contact doesn't acknowledge in time.
+--
+-- WHO MAY MODIFY:
+--   NATIONAL_ADMIN          → any POE
+--   POE_ADMIN               → only their own POE
+--   Non-admin roles         → read-only
+-- --------------------------------------------------------
+
+CREATE TABLE `poe_notification_contacts` (
+  `id`            bigint UNSIGNED NOT NULL,
+  `country_code`  varchar(10) NOT NULL,
+  `district_code` varchar(30) NOT NULL,
+  `poe_code`      varchar(40) NOT NULL,
+  `level`         enum('POE','DISTRICT','PHEOC','NATIONAL','WHO') NOT NULL,
+  `full_name`     varchar(160) NOT NULL,
+  `position`      varchar(120) DEFAULT NULL COMMENT 'Job title (e.g. District Health Officer)',
+  `organisation`  varchar(160) DEFAULT NULL,
+  `phone`         varchar(40) DEFAULT NULL,
+  `alternate_phone` varchar(40) DEFAULT NULL,
+  `email`         varchar(160) DEFAULT NULL,
+  `alternate_email` varchar(160) DEFAULT NULL,
+  `priority_order` int UNSIGNED NOT NULL DEFAULT '1' COMMENT 'Within same level, 1 = primary, 2 = backup',
+  `escalates_to_contact_id` bigint UNSIGNED DEFAULT NULL,
+  `is_active`     tinyint(1) NOT NULL DEFAULT '1',
+  `receives_critical` tinyint(1) NOT NULL DEFAULT '1',
+  `receives_high`     tinyint(1) NOT NULL DEFAULT '1',
+  `receives_medium`   tinyint(1) NOT NULL DEFAULT '0',
+  `receives_low`      tinyint(1) NOT NULL DEFAULT '0',
+  `receives_tier1`        tinyint(1) NOT NULL DEFAULT '1',
+  `receives_tier2`        tinyint(1) NOT NULL DEFAULT '1',
+  `receives_breach_alerts` tinyint(1) NOT NULL DEFAULT '1' COMMENT '7-1-7 breaches',
+  `receives_followup_reminders` tinyint(1) NOT NULL DEFAULT '1',
+  `receives_daily_report`       tinyint(1) NOT NULL DEFAULT '0',
+  `receives_weekly_report`      tinyint(1) NOT NULL DEFAULT '0',
+  `preferred_channel` enum('EMAIL','SMS','BOTH') NOT NULL DEFAULT 'EMAIL',
+  `notes`         varchar(500) DEFAULT NULL,
+  `last_notified_at` datetime DEFAULT NULL,
+  `created_by_user_id` bigint UNSIGNED NOT NULL,
+  `updated_by_user_id` bigint UNSIGNED DEFAULT NULL,
+  `deleted_at`    datetime DEFAULT NULL,
+  `created_at`    datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at`    datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `poe_contacts_poe_level_idx` (`poe_code`, `level`, `priority_order`),
+  KEY `poe_contacts_district_level_idx` (`district_code`, `level`),
+  KEY `poe_contacts_country_idx`   (`country_code`),
+  KEY `poe_contacts_active_idx`    (`is_active`),
+  KEY `poe_contacts_escalates_idx` (`escalates_to_contact_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+-- --------------------------------------------------------
+
+--
+-- ╔══════════════════════════════════════════════════════════════════════╗
+-- ║  NOTIFICATION TEMPLATES + LOG                                         ║
+-- ╚══════════════════════════════════════════════════════════════════════╝
+-- Templates hold the subject/body copy for each event type. Log captures
+-- every send attempt for audit + retry.
+-- --------------------------------------------------------
+
+CREATE TABLE `notification_templates` (
+  `id`               bigint UNSIGNED NOT NULL,
+  `template_code`    varchar(60) NOT NULL COMMENT 'ALERT_CRITICAL | ALERT_HIGH | TIER1_ADVISORY | ANNEX2_HIT | BREACH_717 | FOLLOWUP_DUE | FOLLOWUP_OVERDUE | DAILY_REPORT | WEEKLY_REPORT | ESCALATION | PHEIC_ADVISORY | ALERT_CLOSED',
+  `channel`          enum('EMAIL','SMS','PUSH') NOT NULL DEFAULT 'EMAIL',
+  `subject_template` varchar(200) NOT NULL COMMENT 'Mustache-style {{variable}} tokens',
+  `body_html_template` text NOT NULL,
+  `body_text_template` text DEFAULT NULL,
+  `applicable_levels` json DEFAULT NULL COMMENT 'Array of levels this template is valid for',
+  `is_ai_enhanced`   tinyint(1) NOT NULL DEFAULT '0' COMMENT 'If 1, controller enriches body before send',
+  `is_active`        tinyint(1) NOT NULL DEFAULT '1',
+  `created_at`       datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at`       datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `notification_templates_code_channel_unique` (`template_code`, `channel`),
+  KEY `notification_templates_active_idx` (`is_active`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE `notification_log` (
+  `id`               bigint UNSIGNED NOT NULL,
+  `contact_id`       bigint UNSIGNED DEFAULT NULL,
+  `to_email`         varchar(160) DEFAULT NULL,
+  `to_phone`         varchar(40)  DEFAULT NULL,
+  `channel`          enum('EMAIL','SMS','PUSH') NOT NULL DEFAULT 'EMAIL',
+  `template_code`    varchar(60) NOT NULL,
+  `subject`          varchar(240) DEFAULT NULL,
+  `body_preview`     varchar(500) DEFAULT NULL,
+  `body_full`        text DEFAULT NULL,
+  `related_entity_type` varchar(40) DEFAULT NULL COMMENT 'ALERT | FOLLOWUP | SUBMISSION | REPORT',
+  `related_entity_id`   bigint UNSIGNED DEFAULT NULL,
+  `country_code`     varchar(10) DEFAULT NULL,
+  `district_code`    varchar(30) DEFAULT NULL,
+  `poe_code`         varchar(40) DEFAULT NULL,
+  `status`           enum('QUEUED','SENT','FAILED','BOUNCED','SKIPPED') NOT NULL DEFAULT 'QUEUED',
+  `error_message`    varchar(500) DEFAULT NULL,
+  `retry_count`      int UNSIGNED NOT NULL DEFAULT '0',
+  `sent_at`          datetime DEFAULT NULL,
+  `delivered_at`     datetime DEFAULT NULL,
+  `failed_at`        datetime DEFAULT NULL,
+  `triggered_by`     varchar(40) NOT NULL COMMENT 'USER:{id} | CRON:{task} | SYSTEM',
+  `created_at`       datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at`       datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `notification_log_status_idx`   (`status`, `created_at`),
+  KEY `notification_log_template_idx` (`template_code`, `created_at`),
+  KEY `notification_log_entity_idx`   (`related_entity_type`, `related_entity_id`),
+  KEY `notification_log_contact_idx`  (`contact_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+-- --------------------------------------------------------
+
+--
+-- Table structure for table `alert_followups`
+-- Tracks RTSL 14 early response actions per alert per the 7-1-7 framework.
+-- One row = one follow-up action attached to an alert.
+--
+
+CREATE TABLE `alert_followups` (
+  `id` bigint UNSIGNED NOT NULL,
+  `client_uuid` char(36) NOT NULL,
+  `alert_id` bigint UNSIGNED NOT NULL,
+  `alert_client_uuid` char(36) DEFAULT NULL,
+  `action_code` varchar(60) NOT NULL COMMENT 'RTSL action code: CASE_INVESTIGATION | ISOLATION | CONTACT_TRACING | LAB_CONFIRMATION | RISK_COMMS | ...',
+  `action_label` varchar(200) NOT NULL,
+  `status` enum('PENDING','IN_PROGRESS','COMPLETED','BLOCKED','NOT_APPLICABLE') NOT NULL DEFAULT 'PENDING',
+  `due_at` datetime DEFAULT NULL,
+  `started_at` datetime DEFAULT NULL,
+  `completed_at` datetime DEFAULT NULL,
+  `completed_by_user_id` bigint UNSIGNED DEFAULT NULL,
+  `assigned_to_user_id` bigint UNSIGNED DEFAULT NULL,
+  `assigned_to_role` varchar(40) DEFAULT NULL,
+  `notes` varchar(500) DEFAULT NULL,
+  `evidence_ref` varchar(200) DEFAULT NULL COMMENT 'Optional reference to evidence (file URL, case note id, etc.)',
+  `who_notification_reference` varchar(80) DEFAULT NULL COMMENT 'WHO IHR reference number if this follow-up logged a WHO notification',
+  `blocks_closure` tinyint(1) NOT NULL DEFAULT '0' COMMENT '1 = alert cannot be CLOSED until this follow-up is COMPLETED',
+  `country_code` varchar(10) NOT NULL,
+  `district_code` varchar(30) NOT NULL,
+  `poe_code` varchar(40) NOT NULL,
+  `created_by_user_id` bigint UNSIGNED NOT NULL,
+  `device_id` varchar(80) NOT NULL,
+  `app_version` varchar(40) DEFAULT NULL,
+  `platform` enum('ANDROID','IOS','WEB') NOT NULL DEFAULT 'ANDROID',
+  `record_version` int UNSIGNED NOT NULL DEFAULT '1',
+  `sync_status` enum('UNSYNCED','SYNCED','FAILED') NOT NULL DEFAULT 'UNSYNCED',
+  `synced_at` datetime DEFAULT NULL,
+  `sync_attempt_count` int UNSIGNED NOT NULL DEFAULT '0',
+  `last_sync_error` varchar(500) DEFAULT NULL,
+  `deleted_at` datetime DEFAULT NULL,
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `alert_followups_client_uuid_unique` (`client_uuid`),
+  KEY `alert_followups_alert_id_idx` (`alert_id`),
+  KEY `alert_followups_status_idx` (`status`),
+  KEY `alert_followups_poe_code_idx` (`poe_code`),
+  KEY `alert_followups_due_at_idx` (`due_at`),
+  KEY `alert_followups_sync_status_idx` (`sync_status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+-- --------------------------------------------------------
+
+--
 -- Table structure for table `cache`
 --
 

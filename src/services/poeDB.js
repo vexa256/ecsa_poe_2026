@@ -33,7 +33,7 @@ export const APP = Object.freeze({
 
     // IndexedDB
     DB_NAME: 'poe_offline_db',
-    MIN_SCHEMA_VERSION: 13,
+    MIN_SCHEMA_VERSION: 16,
 
     // Sync engine timing — import these, never hardcode per-view
     SYNC_RETRY_MS: 10000,  // flat retry interval for UNSYNCED records
@@ -77,7 +77,10 @@ export const STORE = Object.freeze({
     SECONDARY_TRAVEL_COUNTRIES: 'secondary_travel_countries',
     SECONDARY_SUSPECTED_DISEASES: 'secondary_suspected_diseases',
     ALERTS: 'alerts',
+    ALERT_FOLLOWUPS: 'alert_followups',
     AGGREGATED_SUBMISSIONS: 'aggregated_submissions',
+    AGGREGATED_TEMPLATES_CACHE: 'aggregated_templates_cache',
+    POE_NOTIFICATION_CONTACTS: 'poe_notification_contacts',
     SYNC_BATCHES: 'sync_batches',
     SYNC_BATCH_ITEMS: 'sync_batch_items',
 })
@@ -109,7 +112,10 @@ export const STORE_KEY = Object.freeze({
     [STORE.SECONDARY_TRAVEL_COUNTRIES]: 'client_uuid',       // IDB-only generated key
     [STORE.SECONDARY_SUSPECTED_DISEASES]: 'client_uuid',       // IDB-only generated key
     [STORE.ALERTS]: 'client_uuid',
+    [STORE.ALERT_FOLLOWUPS]: 'client_uuid',
     [STORE.AGGREGATED_SUBMISSIONS]: 'client_uuid',
+    [STORE.AGGREGATED_TEMPLATES_CACHE]: 'id', // server id = cache key
+    [STORE.POE_NOTIFICATION_CONTACTS]: 'client_uuid',
     [STORE.SYNC_BATCHES]: 'client_batch_uuid', // matches SQL column
     [STORE.SYNC_BATCH_ITEMS]: 'entity_client_uuid',// matches SQL column
 })
@@ -288,10 +294,36 @@ function applySchema(db, tx) {
             'secondary_screening_id'].forEach(f => ensureIdx(s, f, f))
     }
 
+    // ── alert_followups ───────────────────────────────────────────────────
+    // RTSL 14 early response actions per alert — enforces 7-1-7 follow-up
+    {
+        const s = ensureStore('alert_followups', 'client_uuid')
+        ;['sync_status', 'poe_code', 'alert_id', 'alert_client_uuid',
+            'status', 'due_at', 'action_code'].forEach(f => ensureIdx(s, f, f))
+    }
+
     // ── aggregated_submissions ────────────────────────────────────────────
     {
         const s = ensureStore('aggregated_submissions', 'client_uuid')
-        ;['sync_status', 'poe_code', 'period_start', 'district_code'].forEach(f => ensureIdx(s, f, f))
+        ;['sync_status', 'poe_code', 'period_start', 'district_code', 'template_id'].forEach(f => ensureIdx(s, f, f))
+    }
+
+    // ── aggregated_templates_cache ────────────────────────────────────────
+    // Offline copy of PUBLISHED templates so the Hub + submission form work
+    // with zero network. Key = server template id. Polled/refreshed by
+    // AggregatedHub.vue on every view enter + 30s poll.
+    {
+        const s = ensureStore('aggregated_templates_cache', 'id')
+        ;['country_code', 'status', 'reporting_frequency', 'is_default'].forEach(f => ensureIdx(s, f, f))
+    }
+
+    // ── poe_notification_contacts ────────────────────────────────────────
+    // Offline landing store for admin-authored POE contacts. Normally the
+    // admin UI writes direct to the server, but if an admin drafts a
+    // contact offline it lands here and is picked up by SyncManagement.
+    {
+        const s = ensureStore('poe_notification_contacts', 'client_uuid')
+        ;['sync_status', 'poe_code', 'country_code', 'district_code', 'level'].forEach(f => ensureIdx(s, f, f))
     }
 
     // ── sync_batches (keyPath = client_batch_uuid matches SQL column) ─────

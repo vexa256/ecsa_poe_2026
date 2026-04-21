@@ -1,635 +1,698 @@
 <template>
   <IonPage>
 
-    <!-- ══════════════════════════════════════════════════════════════════
-         HEADER — Sentinel Design · Deep Blue Gradient
+    <!-- ══════════════════════════════════════════════════════════════
+         DARK ZONE — Header, Stats, Search, Filters
     ══════════════════════════════════════════════════════════════════ -->
-    <IonHeader :translucent="false" class="poe-hdr">
-      <IonToolbar class="poe-toolbar">
-
-        <!-- Back button -->
+    <IonHeader :translucent="false" class="ph-header">
+      <IonToolbar class="ph-toolbar">
         <IonButtons slot="start">
-          <IonBackButton default-href="/dashboard" text="" class="poe-back-btn" />
+          <IonBackButton default-href="/home" text="" style="--color:#00B4FF;" aria-label="Back"/>
         </IonButtons>
-
-        <!-- Title block -->
-        <div class="hdr-title-block" slot="default">
-          <span class="hdr-eyebrow">ECSA-HC · IHR SURVEILLANCE</span>
-          <IonTitle class="hdr-main-title">Points of Entry</IonTitle>
-        </div>
-
-        <!-- Total POE badge -->
-        <IonButtons slot="end">
-          <div class="hdr-count-badge" aria-label="Total POEs in reference data">
-            <span class="hdr-count-num">{{ allPoes.length }}</span>
-            <span class="hdr-count-lbl">POEs</span>
+        <IonTitle>
+          <div class="ph-title-block">
+            <span class="ph-eyebrow">ECSA-HC · IHR 2005 · ARTICLE 23</span>
+            <span class="ph-title">Points of Entry</span>
           </div>
-        </IonButtons>
+        </IonTitle>
+        <div slot="end" class="ph-network-badge">
+          <span class="ph-network-dot"/>
+          <span class="ph-network-n">{{ allPoes.length }}</span>
+          <span class="ph-network-l">POEs</span>
+        </div>
       </IonToolbar>
 
-      <!-- ── Stats strip — 4 columns ── -->
-      <div class="stats-strip" role="region" aria-label="Network statistics">
-        <div class="ss-cell">
-          <span class="ss-num">{{ allPoes.length }}</span>
-          <span class="ss-lbl">Total</span>
+      <!-- Stats ribbon — dark zone, bright accents -->
+      <div class="ph-stats-ribbon">
+        <div class="ph-stats-texture"/>
+        <div class="ph-stat">
+          <span class="ph-stat-n">{{ allPoes.length }}</span>
+          <span class="ph-stat-l">Total</span>
         </div>
-        <div class="ss-cell">
-          <span class="ss-num ss-num--land">{{ landCount }}</span>
-          <span class="ss-lbl">Land</span>
+        <div class="ph-stat-sep"/>
+        <div class="ph-stat">
+          <span class="ph-stat-n ph-stat-n--green">{{ landCount }}</span>
+          <span class="ph-stat-l">Land</span>
         </div>
-        <div class="ss-cell">
-          <span class="ss-num ss-num--air">{{ airCount }}</span>
-          <span class="ss-lbl">Air</span>
+        <div class="ph-stat-sep"/>
+        <div class="ph-stat">
+          <span class="ph-stat-n ph-stat-n--blue">{{ airCount }}</span>
+          <span class="ph-stat-l">Air</span>
         </div>
-        <div class="ss-cell">
-          <span class="ss-num ss-num--water">{{ waterCount }}</span>
-          <span class="ss-lbl">Water</span>
+        <div class="ph-stat-sep"/>
+        <div class="ph-stat">
+          <span class="ph-stat-n ph-stat-n--teal">{{ waterCount }}</span>
+          <span class="ph-stat-l">Water</span>
+        </div>
+        <div class="ph-stat-sep"/>
+        <div class="ph-stat">
+          <span class="ph-stat-n ph-stat-n--amber">{{ majorCount }}</span>
+          <span class="ph-stat-l">Major</span>
+        </div>
+        <div class="ph-stat-sep"/>
+        <div class="ph-stat">
+          <span class="ph-stat-n ph-stat-n--purple">{{ osbpCount }}</span>
+          <span class="ph-stat-l">OSBP</span>
         </div>
       </div>
 
-      <!-- ── Search bar ── -->
-      <div class="search-area">
-        <div class="search-wrap" role="search">
-          <svg class="search-ic" viewBox="0 0 18 18" fill="none" stroke="#7096C8" stroke-width="1.8"
-               stroke-linecap="round" aria-hidden="true">
-            <circle cx="7.5" cy="7.5" r="5.5"/>
-            <line x1="12" y1="12" x2="16" y2="16"/>
+      <!-- Search bar -->
+      <div class="ph-search-zone">
+        <div class="ph-search-bar" :class="searchQuery && 'ph-search-bar--active'">
+          <svg class="ph-search-ic" viewBox="0 0 18 18" fill="none" stroke="#7E92AB" stroke-width="1.6" stroke-linecap="round" aria-hidden="true">
+            <circle cx="7.5" cy="7.5" r="5.5"/><line x1="12" y1="12" x2="16" y2="16"/>
           </svg>
           <input
             v-model="searchQuery"
-            type="search"
-            class="search-input"
-            placeholder="Search POE name, district, province…"
+            class="ph-search-input"
+            placeholder="Search by name, district, RPHEOC, code…"
             aria-label="Search points of entry"
             autocomplete="off"
-            spellcheck="false"
           />
-          <button
-            v-if="searchQuery"
-            class="search-clear-btn"
-            @click="searchQuery = ''"
-            aria-label="Clear search"
-          >
-            <svg viewBox="0 0 14 14" fill="none" stroke="#7096C8" stroke-width="2" stroke-linecap="round">
-              <line x1="3" y1="3" x2="11" y2="11"/>
-              <line x1="11" y1="3" x2="3" y2="11"/>
-            </svg>
-          </button>
+          <button v-if="searchQuery" class="ph-search-clear" @click="searchQuery=''" aria-label="Clear search">✕</button>
         </div>
       </div>
 
-      <!-- ── Transport mode filter chips ── -->
-      <div class="chip-row chip-row--modes" role="toolbar" aria-label="Filter by transport mode">
+      <!-- Mode filter chips -->
+      <div class="ph-chip-row">
         <button
-          v-for="m in modeFilters"
-          :key="m.value"
-          class="f-chip f-chip--mode"
-          :class="{ 'f-chip--active': activeMode === m.value,
-                    [`f-chip--${m.color}`]: true }"
+          v-for="m in modeFilters" :key="m.value"
+          class="ph-chip"
+          :class="['ph-chip--' + m.color, activeMode === m.value && 'ph-chip--active']"
+          @click="activeMode = m.value"
           :aria-pressed="activeMode === m.value"
-          @click="setMode(m.value)"
         >
-          <!-- Inline SVG icons per mode -->
-          <svg v-if="m.value === 'ALL'" class="chip-ic" viewBox="0 0 14 14" fill="none"
-               stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true">
-            <circle cx="7" cy="7" r="5.5"/>
-            <line x1="1.5" y1="7" x2="12.5" y2="7"/>
-            <path d="M7 1.5 C9.5 3 11 5 11 7 C11 9 9.5 11 7 12.5"/>
-            <path d="M7 1.5 C4.5 3 3 5 3 7 C3 9 4.5 11 7 12.5"/>
+          <!-- SVG per mode -->
+          <svg v-if="m.value==='ALL'" class="ph-chip-ic" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true">
+            <circle cx="7" cy="7" r="5.5"/><line x1="1.5" y1="7" x2="12.5" y2="7"/>
+            <path d="M7 1.5 C9.5 3 11 5 11 7"/><path d="M7 1.5 C4.5 3 3 5 3 7"/>
           </svg>
-          <svg v-else-if="m.value === 'land'" class="chip-ic" viewBox="0 0 14 14" fill="none"
-               stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true">
-            <rect x="1" y="4" width="12" height="7" rx="1.5"/>
-            <path d="M1 7h12"/><circle cx="3.5" cy="11" r="1.5"/><circle cx="10.5" cy="11" r="1.5"/>
+          <svg v-else-if="m.value==='land'" class="ph-chip-ic" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true">
+            <rect x="1" y="4" width="12" height="7" rx="1.5"/><path d="M1 7h12"/>
+            <circle cx="3.5" cy="11" r="1.4"/><circle cx="10.5" cy="11" r="1.4"/>
           </svg>
-          <svg v-else-if="m.value === 'air'" class="chip-ic" viewBox="0 0 14 14" fill="none"
-               stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true">
-            <path d="M2 9 L6 7 L3 2 L5 2 L9 7 L12 6.5 C13.5 6.5 13.5 7.5 12 7.5 L9 7 L5.5 12 L3.5 12 L6 7"/>
+          <svg v-else-if="m.value==='air'" class="ph-chip-ic" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true">
+            <path d="M2 9L6 7 3 2 5 2 9 7 12 6.5C13.5 6.5 13.5 7.5 12 7.5L9 7 5.5 12 3.5 12 6 7"/>
           </svg>
-          <svg v-else-if="m.value === 'water'" class="chip-ic" viewBox="0 0 14 14" fill="none"
-               stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true">
+          <svg v-else class="ph-chip-ic" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true">
             <path d="M1 10 C3 8.5 5 8.5 7 10 C9 11.5 11 11.5 13 10"/>
-            <path d="M2 4 L5 4 L5 2 L9 2 L9 4 L12 4 L12 8 L2 8 Z"/>
+            <path d="M2 4L5 4 5 2 9 2 9 4 12 4 12 8 2 8Z"/>
           </svg>
-          <span class="chip-lbl">{{ m.label }}</span>
+          {{ m.label }}
+          <em>{{ m.count }}</em>
         </button>
       </div>
 
-      <!-- ── Special flag filters ── -->
-      <div class="chip-row chip-row--flags" role="toolbar" aria-label="Filter by POE classification">
+      <!-- Flag chips -->
+      <div class="ph-chip-row ph-chip-row--flags">
         <button
-          v-for="fl in flagFilters"
-          :key="fl.value"
-          class="f-chip f-chip--flag"
-          :class="{ 'f-chip--active': activeFlag === fl.value,
-                    [`f-chip--${fl.color}`]: true }"
-          :aria-pressed="activeFlag === fl.value"
-          @click="setFlag(fl.value)"
+          v-for="f in flagFilters" :key="f.value"
+          class="ph-chip ph-chip--flag"
+          :class="activeFlag === f.value && 'ph-chip--active'"
+          @click="activeFlag = f.value"
         >
-          <span class="chip-lbl">{{ fl.label }}</span>
-          <span class="chip-count">{{ fl.count }}</span>
+          {{ f.label }} <em>{{ f.count }}</em>
         </button>
       </div>
-
     </IonHeader>
 
-    <!-- ══════════════════════════════════════════════════════════════════
-         CONTENT — POE List
+    <!-- ══════════════════════════════════════════════════════════════
+         LIGHT ZONE — Content
     ══════════════════════════════════════════════════════════════════ -->
-    <IonContent :fullscreen="true" class="poe-content">
-      <IonRefresher slot="fixed" @ionRefresh="handleRefresh($event)">
-        <IonRefresherContent refreshing-spinner="crescent" />
+    <IonContent
+      :fullscreen="true"
+      :scroll-y="true"
+      style="--background:linear-gradient(180deg,#EAF0FA 0%,#F2F5FB 40%,#E4EBF7 100%);--color:#0B1A30;"
+    >
+      <IonRefresher slot="fixed" @ionRefresh="e => setTimeout(() => e.target.complete(), 400)">
+        <IonRefresherContent refreshing-spinner="crescent"/>
       </IonRefresher>
 
-      <!-- ── Empty state ── -->
-      <div v-if="!filteredPoes.length" class="empty-state" role="status">
-        <div class="empty-icon-wrap" aria-hidden="true">
-          <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg" class="empty-icon">
-            <circle cx="32" cy="32" r="26" stroke="#BBDEFB" stroke-width="2"/>
-            <path d="M32 6C32 6 20 16 20 32C20 48 32 58 32 58C32 58 44 48 44 32C44 16 32 6 32 6Z"
-                  stroke="#BBDEFB" stroke-width="1.5" fill="none"/>
-            <ellipse cx="32" cy="32" rx="26" ry="10" stroke="#BBDEFB" stroke-width="1.5" fill="none"/>
-            <line x1="8" y1="32" x2="56" y2="32" stroke="#BBDEFB" stroke-width="1.5"/>
-          </svg>
-        </div>
-        <p class="empty-title">No Points of Entry Found</p>
-        <p class="empty-sub">
-          No Uganda POEs match your current filters.<br>
-          Try adjusting your search or clearing the filters.
-        </p>
-        <button v-if="hasActiveFilters" class="empty-clear-btn" @click="clearAllFilters">
-          Clear All Filters
-        </button>
+      <!-- Empty state -->
+      <div v-if="!filteredPoes.length" class="ph-empty">
+        <div class="ph-empty-icon">🗺</div>
+        <div class="ph-empty-title">No POEs Found</div>
+        <div class="ph-empty-body">Adjust your search or clear the filters.</div>
+        <button v-if="hasActiveFilters" class="ph-empty-clear" @click="clearFilters" aria-label="Clear all filters">Clear Filters</button>
       </div>
 
-      <!-- ── POE list — grouped by province/admin_level_1 ── -->
-      <div v-else class="poe-list">
+      <!-- Grouped POE list -->
+      <div v-else class="ph-list">
 
-        <!-- Section group per province/admin_level_1 -->
+        <!-- Results count -->
+        <div class="ph-results-bar">
+          <span class="ph-results-text">
+            {{ filteredPoes.length }} of {{ allPoes.length }} POEs
+            <template v-if="hasActiveFilters"> · filtered</template>
+          </span>
+          <button v-if="hasActiveFilters" class="ph-results-clear" @click="clearFilters">Clear</button>
+        </div>
+
         <template v-for="group in groupedPoes" :key="group.admin_level_1">
 
-          <!-- Section header -->
-          <div class="section-hdr" role="separator">
-            <div class="sh-left">
-              <!-- PHEOC icon (Uganda) vs Province icon (Rwanda) -->
-              <div class="sh-type-dot"
-                   :class="group.type === 'PHEOC' ? 'sh-dot--pheoc' : 'sh-dot--province'"
-                   :aria-label="group.type === 'PHEOC' ? 'RPHEOC region' : 'Province'"
-              />
-              <span class="sh-label">{{ group.admin_level_1 }}</span>
-              <span v-if="group.type === 'PHEOC'" class="sh-type-tag sh-tag--pheoc">RPHEOC</span>
-              <span v-else class="sh-type-tag sh-tag--province">Province</span>
-            </div>
-            <span class="sh-count">{{ group.poes.length }}</span>
+          <!-- Group header -->
+          <div class="ph-group-hdr">
+            <div class="ph-group-dot" :class="group.type === 'PHEOC' ? 'ph-group-dot--pheoc' : 'ph-group-dot--province'"/>
+            <span class="ph-group-name">{{ group.admin_level_1 }}</span>
+            <span class="ph-group-tag" :class="group.type === 'PHEOC' ? 'ph-group-tag--pheoc' : 'ph-group-tag--province'">
+              {{ group.type === 'PHEOC' ? 'RPHEOC' : 'Province' }}
+            </span>
+            <span class="ph-group-count">{{ group.poes.length }}</span>
           </div>
 
-          <!-- POE cards within section -->
+          <!-- POE cards -->
           <div
-            v-for="poe in group.poes"
-            :key="poe.id"
-            class="poe-card"
+            v-for="(poe, i) in group.poes" :key="poe.id"
+            class="ph-card"
+            :style="{ animationDelay: i * 30 + 'ms' }"
+            @click="openDetail(poe)"
             role="button"
             tabindex="0"
-            :aria-label="`${poe.poe_name}, ${transportLabel(poe.transport_mode)}, ${poe.district}`"
-            @click="openDetail(poe)"
-            @keydown.enter="openDetail(poe)"
-            @keydown.space.prevent="openDetail(poe)"
+            :aria-label="poe.poe_name + ', ' + transportLabel(poe.transport_mode)"
           >
-            <!-- Left mode accent bar -->
-            <div class="poe-card-accent"
-                 :class="`accent--${poe.transport_mode || 'land'}`"
-                 aria-hidden="true"
-            />
+            <!-- Shimmer sweep -->
+            <div class="ph-card-stream" aria-hidden="true"/>
+            <!-- Left accent bar -->
+            <div class="ph-card-bar" :class="'ph-card-bar--' + (poe.transport_mode || 'land')" aria-hidden="true"/>
 
-            <!-- Card body -->
-            <div class="poe-card-body">
-
-              <!-- Row 1: Icon + Name + Flag badges -->
-              <div class="pcb-row1">
-                <!-- Transport mode icon -->
-                <div class="poe-mode-icon"
-                     :class="`mode-ic--${poe.transport_mode || 'land'}`"
-                     :aria-label="transportLabel(poe.transport_mode)"
-                >
-                  <!-- LAND -->
-                  <svg v-if="poe.transport_mode === 'land'" viewBox="0 0 18 18" fill="none"
-                       stroke="currentColor" stroke-width="1.7" stroke-linecap="round">
-                    <rect x="1.5" y="5" width="15" height="9" rx="1.5"/>
-                    <path d="M1.5 9h15"/>
-                    <circle cx="4.5" cy="14" r="1.8"/>
-                    <circle cx="13.5" cy="14" r="1.8"/>
+            <div class="ph-card-body">
+              <!-- Row 1: icon + name + badges -->
+              <div class="ph-card-r1">
+                <div class="ph-mode-icon" :class="'ph-mode-icon--' + (poe.transport_mode || 'land')" aria-label="Transport mode">
+                  <svg v-if="poe.transport_mode==='land'" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true">
+                    <rect x="1.5" y="5" width="15" height="9" rx="1.5"/><path d="M1.5 9h15"/>
+                    <circle cx="4.5" cy="14" r="1.8"/><circle cx="13.5" cy="14" r="1.8"/>
                   </svg>
-                  <!-- AIR: airport / airstrip -->
-                  <svg v-else-if="poe.transport_mode === 'air'" viewBox="0 0 18 18" fill="none"
-                       stroke="currentColor" stroke-width="1.7" stroke-linecap="round">
+                  <svg v-else-if="poe.transport_mode==='air'" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true">
                     <path d="M2 11.5L7.5 9 4 3 6.5 3 12 9 15.5 8.5C17.5 8.5 17.5 9.5 15.5 9.5L12 9 7 15.5 4.5 15.5 7.5 9"/>
                   </svg>
-                  <!-- WATER: port / island -->
-                  <svg v-else viewBox="0 0 18 18" fill="none"
-                       stroke="currentColor" stroke-width="1.7" stroke-linecap="round">
+                  <svg v-else viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true">
                     <path d="M1.5 13 C4.5 11 7 11 9 13 C11 15 13.5 15 16.5 13"/>
-                    <path d="M3 5.5 L6 5.5 L6 3 L12 3 L12 5.5 L15 5.5 L15 11 L3 11 Z"/>
+                    <path d="M3 5.5L6 5.5 6 3 12 3 12 5.5 15 5.5 15 11 3 11Z"/>
                   </svg>
                 </div>
-
-                <!-- POE name -->
-                <div class="poe-name-block">
-                  <span class="poe-name">{{ poe.poe_name }}</span>
-                  <span class="poe-type-lbl">{{ formatPoeType(poe.poe_type) }}</span>
+                <div class="ph-name-block">
+                  <span class="ph-name">{{ poe.poe_name }}</span>
+                  <span class="ph-type">{{ formatPoeType(poe.poe_type) }}</span>
                 </div>
-
-                <!-- Classification badges (right side) -->
-                <div class="poe-badges" aria-label="Classifications">
-                  <span v-if="poe.is_major_entry" class="poe-badge badge--major" aria-label="Major entry point">
-                    MAJOR
-                  </span>
-                  <span v-if="poe.is_recommended_osbp" class="poe-badge badge--osbp" aria-label="One-Stop Border Post">
-                    OSBP
-                  </span>
-                  <span v-if="poe.is_national_level" class="poe-badge badge--national" aria-label="National level POE">
-                    NATIONAL
-                  </span>
+                <div class="ph-card-badges">
+                  <span v-if="poe.is_major_entry"      class="ph-badge ph-badge--major">MAJOR</span>
+                  <span v-if="poe.is_recommended_osbp" class="ph-badge ph-badge--osbp">OSBP</span>
+                  <span v-if="poe.is_national_level"   class="ph-badge ph-badge--national">NATIONAL</span>
                 </div>
               </div>
-
               <!-- Row 2: Geography -->
-              <div class="pcb-row2">
-                <svg viewBox="0 0 12 12" fill="none" stroke="#7096C8" stroke-width="1.5"
-                     stroke-linecap="round" class="geo-ic" aria-hidden="true">
-                  <path d="M6 1C3.8 1 2 2.8 2 5c0 3.3 4 6 4 6s4-2.7 4-6c0-2.2-1.8-4-4-4z"/>
-                  <circle cx="6" cy="5" r="1.3"/>
-                </svg>
-                <span class="pcb-district">{{ poe.district }}</span>
-                <span class="pcb-sep" aria-hidden="true">·</span>
-                <span class="pcb-province">{{ poe.province }}</span>
+              <div class="ph-card-r2">
+                <span class="ph-geo-pin" aria-hidden="true">📍</span>
+                <span class="ph-district">{{ poe.district }}</span>
+                <span class="ph-sep">·</span>
+                <span class="ph-province">{{ poe.province }}</span>
               </div>
-
-              <!-- Row 3: Code + RPHEOC + Border country -->
-              <div class="pcb-row3">
-                <span v-if="poe.poe_code" class="pcb-code" :aria-label="`POE code: ${poe.poe_code}`">
-                  {{ poe.poe_code }}
-                </span>
-
-                <template v-if="poe.border_country">
-                  <span class="pcb-sep" aria-hidden="true">·</span>
-                  <svg viewBox="0 0 12 12" fill="none" stroke="#10B981" stroke-width="1.5"
-                       stroke-linecap="round" class="border-ic" aria-hidden="true">
-                    <path d="M1 6h10M8 3l3 3-3 3"/>
-                  </svg>
-                  <span class="pcb-border" :aria-label="`Border with ${poe.border_country}`">
-                    {{ poe.border_country }}
-                  </span>
-                </template>
+              <!-- Row 3: code + border -->
+              <div class="ph-card-r3">
+                <code v-if="poe.poe_code" class="ph-code">{{ poe.poe_code }}</code>
+                <span v-if="poe.poe_code && poe.border_country" class="ph-sep">·</span>
+                <span v-if="poe.border_country" class="ph-border">→ {{ poe.border_country }}</span>
+                <span v-if="poe.critical_details" class="ph-has-notes">📋 Notes</span>
               </div>
-
             </div>
-
-            <!-- Chevron indicator -->
-            <div class="poe-card-chevron" aria-hidden="true">
-              <svg viewBox="0 0 10 16" fill="none" stroke="#B0BEC5" stroke-width="1.8" stroke-linecap="round">
-                <polyline points="2 2 8 8 2 14"/>
-              </svg>
-            </div>
+            <div class="ph-card-chevron" aria-hidden="true">›</div>
           </div>
 
         </template>
 
-        <!-- Bottom padding spacer -->
-        <div class="list-bottom-pad" aria-hidden="true" />
+        <div style="height: max(env(safe-area-inset-bottom, 0px), 40px);" aria-hidden="true"/>
       </div>
     </IonContent>
 
-    <!-- ══════════════════════════════════════════════════════════════════
-         DETAIL MODAL — Full POE Information Sheet
-         READ-ONLY: All data from window.POE_MAIN (hardcoded reference data)
+    <!-- ══════════════════════════════════════════════════════════════
+         DETAIL MODAL — Full-screen, premium, every field from POEs.js
     ══════════════════════════════════════════════════════════════════ -->
     <IonModal
       :is-open="!!selectedPoe"
       :can-dismiss="true"
-      :show-backdrop="true"
-      :backdrop-dismiss="true"
-      :initial-breakpoint="0.92"
-      :breakpoints="[0, 0.92, 1]"
-      handle-behavior="cycle"
-      css-class="poe-detail-modal"
+      :initial-breakpoint="1"
+      :breakpoints="[0, 1]"
       @ionModalDidDismiss="selectedPoe = null"
     >
-      <IonContent v-if="selectedPoe" class="modal-content" :scroll-y="true">
-
-        <!-- Modal handle -->
-        <div class="modal-handle" aria-hidden="true" />
-
-        <!-- Modal header — blue gradient -->
-        <div class="modal-hdr" :class="`modal-hdr--${selectedPoe.transport_mode || 'land'}`">
-          <div class="mh-pattern" aria-hidden="true" />
-
-          <!-- Top row -->
-          <div class="mh-top">
-            <button class="mh-close-btn" @click="selectedPoe = null" aria-label="Close detail">
-              <svg viewBox="0 0 16 16" fill="none" stroke="rgba(255,255,255,.85)"
-                   stroke-width="2" stroke-linecap="round">
-                <line x1="3" y1="3" x2="13" y2="13"/>
-                <line x1="13" y1="3" x2="3" y2="13"/>
-              </svg>
-            </button>
-            <div class="mh-title-block">
-              <span class="mh-eyebrow">
-                🇺🇬 Uganda · {{ transportLabel(selectedPoe.transport_mode) }} POE
-              </span>
-              <h2 class="mh-title">{{ selectedPoe.poe_name }}</h2>
+      <IonHeader :translucent="false" v-if="selectedPoe" class="pd-header">
+        <IonToolbar style="--background:linear-gradient(180deg,#070E1B,#0E1A2E);--color:#EDF2FA;--border-width:0;">
+          <IonButtons slot="start">
+            <IonButton @click="selectedPoe = null" aria-label="Close" style="--color:#00B4FF;">
+              <IonIcon :icon="closeOutline"/>
+            </IonButton>
+          </IonButtons>
+          <IonTitle>
+            <div class="pd-toolbar-title">
+              <span class="pd-toolbar-eyebrow">🇺🇬 UGANDA · {{ transportLabel(selectedPoe.transport_mode).toUpperCase() }} POE</span>
+              <span class="pd-toolbar-name">{{ selectedPoe.poe_name }}</span>
             </div>
-            <!-- Read-only tag -->
-            <div class="mh-readonly-tag" aria-label="This view is read-only">
-              <svg viewBox="0 0 14 14" fill="none" stroke="rgba(255,255,255,.7)"
-                   stroke-width="1.6" stroke-linecap="round" aria-hidden="true">
-                <rect x="2" y="6" width="10" height="7" rx="1.5"/>
-                <path d="M4.5 6V4a2.5 2.5 0 015 0v2"/>
-              </svg>
-              <span>Read-only</span>
+          </IonTitle>
+          <div slot="end" class="pd-readonly-tag">READ-ONLY</div>
+        </IonToolbar>
+      </IonHeader>
+
+      <IonContent
+        :scroll-y="true"
+        v-if="selectedPoe"
+        style="--background:linear-gradient(180deg,#EEF2FA 0%,#FFFFFF 50%,#F4F7FC 100%);--color:#0B1A30;"
+      >
+        <!-- ══ CINEMATIC HERO ════════════════════════════════════════ -->
+        <div class="pd-hero" :class="'pd-hero--' + (selectedPoe.transport_mode || 'land')">
+          <div class="pd-hero-texture" aria-hidden="true"/>
+          <div class="pd-hero-orb"     aria-hidden="true"/>
+
+          <!-- Large mode icon -->
+          <div class="pd-hero-mode-icon" :class="'pd-hero-mode-icon--' + (selectedPoe.transport_mode || 'land')" aria-hidden="true">
+            <svg v-if="selectedPoe.transport_mode==='land'" viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+              <rect x="4" y="14" width="40" height="24" rx="4"/>
+              <path d="M4 24h40"/>
+              <circle cx="12" cy="38" r="4.5"/><circle cx="36" cy="38" r="4.5"/>
+              <path d="M12 14v10M24 14v10"/>
+            </svg>
+            <svg v-else-if="selectedPoe.transport_mode==='air'" viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+              <path d="M6 30L18 24 10 8 16 8 30 24 40 22.5C44 22.5 44 25.5 40 25.5L30 24 20 40 14 40 18 24"/>
+            </svg>
+            <svg v-else viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+              <path d="M4 34 C10 29 16 29 24 34 C32 39 38 39 44 34"/>
+              <path d="M8 14L16 14 16 8 32 8 32 14 40 14 40 28 8 28Z"/>
+            </svg>
+          </div>
+
+          <div class="pd-hero-content">
+            <div class="pd-hero-top">
+              <div class="pd-hero-mode-badge" :class="'pd-mode-badge--' + (selectedPoe.transport_mode || 'land')">
+                {{ transportLabel(selectedPoe.transport_mode).toUpperCase() }}
+              </div>
+              <div v-if="selectedPoe.is_national_level" class="pd-hero-national-badge">🏛 NATIONAL</div>
+            </div>
+
+            <h1 class="pd-hero-name">{{ selectedPoe.poe_name }}</h1>
+            <div class="pd-hero-type">{{ formatPoeType(selectedPoe.poe_type) }}</div>
+
+            <!-- Classification flag row -->
+            <div class="pd-hero-flags">
+              <div v-if="selectedPoe.is_major_entry" class="pd-hero-flag pd-hero-flag--major">
+                <span>⚑</span> Major Entry Point
+              </div>
+              <div v-if="selectedPoe.is_recommended_osbp" class="pd-hero-flag pd-hero-flag--osbp">
+                <span>✦</span> One-Stop Border Post
+              </div>
+              <div v-if="selectedPoe.border_country" class="pd-hero-flag pd-hero-flag--border">
+                <span>→</span> {{ selectedPoe.border_country }}
+              </div>
             </div>
           </div>
 
-          <!-- POE type + classification badges row -->
-          <div class="mh-badge-row">
-            <span class="mh-type-pill" :class="`type-pill--${selectedPoe.transport_mode || 'land'}`">
-              {{ formatPoeType(selectedPoe.poe_type) }}
-            </span>
-            <span v-if="selectedPoe.is_major_entry" class="mh-badge badge--major">MAJOR ENTRY</span>
-            <span v-if="selectedPoe.is_recommended_osbp" class="mh-badge badge--osbp">✦ OSBP</span>
-            <span v-if="selectedPoe.is_national_level" class="mh-badge badge--national">NATIONAL</span>
+          <!-- POE Code badge -->
+          <div v-if="selectedPoe.poe_code" class="pd-hero-code-badge">
+            <span class="pd-hero-code-label">POE CODE</span>
+            <code class="pd-hero-code">{{ selectedPoe.poe_code }}</code>
           </div>
         </div>
 
-        <!-- Modal body -->
-        <div class="modal-body">
+        <!-- ══ BODY ═══════════════════════════════════════════════════ -->
+        <div class="pd-body">
 
-          <!-- ── Section 1: Geography ── -->
-          <div class="modal-section-hdr">
-            <div class="msh-num msh-blue">1</div>
-            <span class="msh-title">Geographic Classification</span>
-          </div>
+          <!-- ── 1. GEOGRAPHIC HIERARCHY ────────────────────────── -->
+          <div class="pd-section">
+            <div class="pd-section-label">
+              <div class="pd-section-glyph">🌍</div>
+              GEOGRAPHIC HIERARCHY
+            </div>
 
-          <div class="detail-card">
-            <div class="dc-row">
-              <div class="dc-ic dc-ic--blue" aria-hidden="true">
-                <svg viewBox="0 0 14 14" fill="none" stroke="#1565C0" stroke-width="1.6" stroke-linecap="round">
-                  <circle cx="7" cy="7" r="5.5"/>
-                  <line x1="1.5" y1="7" x2="12.5" y2="7"/>
-                  <path d="M7 1.5 C9 3 10.5 5 10.5 7 C10.5 9 9 11 7 12.5"/>
-                  <path d="M7 1.5 C5 3 3.5 5 3.5 7 C3.5 9 5 11 7 12.5"/>
-                </svg>
+            <!-- Hierarchy tree visualisation -->
+            <div class="pd-hierarchy-tree">
+              <!-- Country node -->
+              <div class="pd-tree-node pd-tree-node--country">
+                <div class="pd-tree-node-icon pd-tree-icon--country">🌐</div>
+                <div class="pd-tree-node-body">
+                  <div class="pd-tree-node-key">Country</div>
+                  <div class="pd-tree-node-val">🇺🇬 Uganda</div>
+                </div>
               </div>
-              <div class="dc-body">
-                <span class="dc-lbl">Country</span>
-                <span class="dc-val">🇺🇬 Uganda</span>
+              <div class="pd-tree-connector"/>
+
+              <!-- RPHEOC / Province node -->
+              <div class="pd-tree-node pd-tree-node--pheoc">
+                <div class="pd-tree-node-icon pd-tree-icon--pheoc">🏥</div>
+                <div class="pd-tree-node-body">
+                  <div class="pd-tree-node-key">{{ selectedPoe.admin_level_1_type === 'PHEOC' ? 'RPHEOC Region' : 'Province' }}</div>
+                  <div class="pd-tree-node-val">{{ selectedPoe.admin_level_1 || selectedPoe.province }}</div>
+                  <div v-if="selectedPoe.admin_level_1_type === 'PHEOC'" class="pd-tree-node-tag">RPHEOC</div>
+                </div>
+              </div>
+              <div class="pd-tree-connector"/>
+
+              <!-- District node -->
+              <div class="pd-tree-node pd-tree-node--district">
+                <div class="pd-tree-node-icon pd-tree-icon--district">📌</div>
+                <div class="pd-tree-node-body">
+                  <div class="pd-tree-node-key">District</div>
+                  <div class="pd-tree-node-val">{{ selectedPoe.district }}</div>
+                  <div v-if="selectedPoe.district_raw && selectedPoe.district_raw !== selectedPoe.district" class="pd-tree-node-sub">Raw: {{ selectedPoe.district_raw }}</div>
+                </div>
+              </div>
+              <div class="pd-tree-connector"/>
+
+              <!-- POE node — terminal -->
+              <div class="pd-tree-node pd-tree-node--poe" :class="'pd-tree-node--' + (selectedPoe.transport_mode || 'land')">
+                <div class="pd-tree-node-icon" :class="'pd-tree-icon--' + (selectedPoe.transport_mode || 'land')">
+                  <svg v-if="selectedPoe.transport_mode==='land'" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+                    <rect x="1" y="4" width="14" height="9" rx="1.5"/><path d="M1 8h14"/>
+                    <circle cx="4" cy="13" r="1.6"/><circle cx="12" cy="13" r="1.6"/>
+                  </svg>
+                  <svg v-else-if="selectedPoe.transport_mode==='air'" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+                    <path d="M2 10L5.5 8 3 2.5 5 2.5 9 8 11.5 7.5C13 7.5 13 8.5 11.5 8.5L9 8 6 13 4 13 5.5 8"/>
+                  </svg>
+                  <svg v-else viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+                    <path d="M1 11.5C3 10 5 10 8 11.5C11 13 13 13 15 11.5"/>
+                    <path d="M2.5 5L5 5 5 3 11 3 11 5 13.5 5 13.5 9 2.5 9Z"/>
+                  </svg>
+                </div>
+                <div class="pd-tree-node-body">
+                  <div class="pd-tree-node-key">Point of Entry</div>
+                  <div class="pd-tree-node-val pd-tree-node-val--poe">{{ selectedPoe.poe_name }}</div>
+                  <div v-if="selectedPoe.regional_cluster_or_rpheoc" class="pd-tree-node-sub">
+                    Cluster: {{ selectedPoe.regional_cluster_or_rpheoc }}
+                  </div>
+                </div>
+                <div class="pd-tree-terminal-dot"/>
               </div>
             </div>
 
-            <div class="dc-row">
-              <div class="dc-ic dc-ic--purple" aria-hidden="true">
-                <svg viewBox="0 0 14 14" fill="none" stroke="#6A1B9A" stroke-width="1.6" stroke-linecap="round">
-                  <rect x="1.5" y="1.5" width="11" height="11" rx="2"/>
-                  <path d="M1.5 5.5h11"/><path d="M5.5 1.5v4"/>
-                </svg>
-              </div>
-              <div class="dc-body">
-                <span class="dc-lbl">
-                  {{ selectedPoe.admin_level_1_type === 'PHEOC' ? 'Province / RPHEOC' : 'Province' }}
-                </span>
-                <span class="dc-val">{{ selectedPoe.province }}</span>
-              </div>
-              <div v-if="selectedPoe.admin_level_1_type === 'PHEOC'" class="dc-right">
-                <span class="dc-badge dc-badge--pheoc">RPHEOC</span>
-              </div>
-            </div>
-
-            <div class="dc-row">
-              <div class="dc-ic dc-ic--orange" aria-hidden="true">
-                <svg viewBox="0 0 14 14" fill="none" stroke="#E65100" stroke-width="1.6" stroke-linecap="round">
-                  <path d="M7 1C4.5 1 2.5 3 2.5 5.5c0 3.8 4.5 7.5 4.5 7.5s4.5-3.7 4.5-7.5C11.5 3 9.5 1 7 1z"/>
-                  <circle cx="7" cy="5.5" r="1.5"/>
-                </svg>
-              </div>
-              <div class="dc-body">
-                <span class="dc-lbl">District</span>
-                <span class="dc-val">{{ selectedPoe.district }}</span>
-              </div>
-            </div>
-
-            <div v-if="selectedPoe.border_country" class="dc-row">
-              <div class="dc-ic dc-ic--green" aria-hidden="true">
-                <svg viewBox="0 0 14 14" fill="none" stroke="#2E7D32" stroke-width="1.6" stroke-linecap="round">
-                  <path d="M1 7h12M9 3.5l3.5 3.5-3.5 3.5"/>
-                </svg>
-              </div>
-              <div class="dc-body">
-                <span class="dc-lbl">Bordering Country</span>
-                <span class="dc-val dc-val--green">{{ selectedPoe.border_country }}</span>
-              </div>
-            </div>
-
-            <div v-if="selectedPoe.regional_cluster_or_rpheoc" class="dc-row">
-              <div class="dc-ic dc-ic--blue" aria-hidden="true">
-                <svg viewBox="0 0 14 14" fill="none" stroke="#1565C0" stroke-width="1.6" stroke-linecap="round">
-                  <circle cx="7" cy="7" r="2.5"/>
-                  <circle cx="2" cy="3" r="1.2"/><circle cx="12" cy="3" r="1.2"/>
-                  <circle cx="2" cy="11" r="1.2"/><circle cx="12" cy="11" r="1.2"/>
-                  <path d="M3 3.8l2.5 2M9 3.8l-2.5 2M3 10.2l2.5-2M9 10.2l-2.5-2"/>
-                </svg>
-              </div>
-              <div class="dc-body">
-                <span class="dc-lbl">RPHEOC Cluster</span>
-                <span class="dc-val">{{ selectedPoe.regional_cluster_or_rpheoc }}</span>
+            <!-- Border country card (if present) -->
+            <div v-if="selectedPoe.border_country" class="pd-border-card">
+              <div class="pd-border-card-shine"/>
+              <div class="pd-border-icon">⇄</div>
+              <div class="pd-border-body">
+                <div class="pd-border-key">Bordering Country</div>
+                <div class="pd-border-val">{{ selectedPoe.border_country }}</div>
               </div>
             </div>
           </div>
 
-          <!-- ── Section 2: Classification ── -->
-          <div class="modal-section-hdr">
-            <div class="msh-num msh-green">2</div>
-            <span class="msh-title">IHR Classification Flags</span>
-          </div>
-
-          <div class="flags-grid">
-            <div class="flag-cell"
-                 :class="selectedPoe.is_major_entry ? 'flag-cell--on flag-cell--major' : 'flag-cell--off'">
-              <div class="flag-ic" aria-hidden="true">
-                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
-                  <polygon points="1,1 15,8 1,15 4,8"/>
-                </svg>
-              </div>
-              <span class="flag-lbl">Major Entry</span>
-              <span class="flag-status">{{ selectedPoe.is_major_entry ? 'YES' : 'NO' }}</span>
+          <!-- ── 2. IHR CLASSIFICATION FLAGS ───────────────────── -->
+          <div class="pd-section">
+            <div class="pd-section-label">
+              <div class="pd-section-glyph">🏛</div>
+              IHR CLASSIFICATION FLAGS
             </div>
-
-            <div class="flag-cell"
-                 :class="selectedPoe.is_recommended_osbp ? 'flag-cell--on flag-cell--osbp' : 'flag-cell--off'">
-              <div class="flag-ic" aria-hidden="true">
-                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
-                  <path d="M8 1l1.8 5.5H15l-4.7 3.4 1.8 5.5L8 12l-4.1 3.4 1.8-5.5L1 6.5h5.2z"/>
-                </svg>
+            <div class="pd-flags-grid">
+              <div class="pd-flag-card" :class="selectedPoe.is_major_entry ? 'pd-flag-card--on pd-flag-card--major' : 'pd-flag-card--off'">
+                <div class="pd-flag-card-shine"/>
+                <div class="pd-flag-icon">⚑</div>
+                <div class="pd-flag-label">Major Entry Point</div>
+                <div class="pd-flag-status">{{ selectedPoe.is_major_entry ? 'DESIGNATED' : 'NOT DESIGNATED' }}</div>
+                <div class="pd-flag-desc">{{ selectedPoe.is_major_entry ? 'Full IHR Annex 1B capacity required. Priority screening facilities.' : 'Standard surveillance capacity applies.' }}</div>
               </div>
-              <span class="flag-lbl">OSBP</span>
-              <span class="flag-status">{{ selectedPoe.is_recommended_osbp ? 'YES' : 'NO' }}</span>
-            </div>
-
-            <div class="flag-cell"
-                 :class="selectedPoe.is_national_level ? 'flag-cell--on flag-cell--national' : 'flag-cell--off'">
-              <div class="flag-ic" aria-hidden="true">
-                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
-                  <rect x="2" y="12" width="12" height="2" rx="1"/>
-                  <rect x="6" y="2" width="4" height="10" rx="1"/>
-                  <path d="M2 2h12v6H2z" rx="1"/>
-                </svg>
+              <div class="pd-flag-card" :class="selectedPoe.is_recommended_osbp ? 'pd-flag-card--on pd-flag-card--osbp' : 'pd-flag-card--off'">
+                <div class="pd-flag-card-shine"/>
+                <div class="pd-flag-icon">✦</div>
+                <div class="pd-flag-label">OSBP Status</div>
+                <div class="pd-flag-status">{{ selectedPoe.is_recommended_osbp ? 'OPERATIONAL' : 'NOT OSBP' }}</div>
+                <div class="pd-flag-desc">{{ selectedPoe.is_recommended_osbp ? 'One-Stop Border Post. Joint health processing with neighboring country.' : 'Standard single-country border processing.' }}</div>
               </div>
-              <span class="flag-lbl">National Level</span>
-              <span class="flag-status">{{ selectedPoe.is_national_level ? 'YES' : 'NO' }}</span>
-            </div>
-          </div>
-
-          <!-- ── Section 3: Operational Details ── -->
-          <div class="modal-section-hdr">
-            <div class="msh-num msh-orange">3</div>
-            <span class="msh-title">Operational Details</span>
-          </div>
-
-          <div class="detail-card">
-            <div class="dc-row">
-              <div class="dc-ic dc-ic--blue" aria-hidden="true">
-                <svg viewBox="0 0 14 14" fill="none" stroke="#1565C0" stroke-width="1.6" stroke-linecap="round">
-                  <rect x="1.5" y="2.5" width="11" height="9" rx="1.5"/>
-                  <path d="M1.5 6h11"/><path d="M5 2.5v3.5"/><path d="M9 2.5v3.5"/>
-                </svg>
-              </div>
-              <div class="dc-body">
-                <span class="dc-lbl">POE Type</span>
-                <span class="dc-val">{{ formatPoeType(selectedPoe.poe_type) }}</span>
-              </div>
-            </div>
-
-            <div class="dc-row">
-              <div class="dc-ic" :class="`dc-ic--${selectedPoe.transport_mode || 'land'}`" aria-hidden="true">
-                <!-- Reuse transport mode inline SVG -->
-                <svg v-if="selectedPoe.transport_mode === 'land'" viewBox="0 0 14 14" fill="none"
-                     stroke="#2E7D32" stroke-width="1.6" stroke-linecap="round">
-                  <rect x="1" y="3.5" width="12" height="7" rx="1.2"/>
-                  <path d="M1 7h12"/>
-                  <circle cx="3.5" cy="10.5" r="1.4"/>
-                  <circle cx="10.5" cy="10.5" r="1.4"/>
-                </svg>
-                <svg v-else-if="selectedPoe.transport_mode === 'air'" viewBox="0 0 14 14" fill="none"
-                     stroke="#1565C0" stroke-width="1.6" stroke-linecap="round">
-                  <path d="M1.5 9L5.5 7 3 2.5 5 2.5 9.5 7 12 6.5C13.5 6.5 13.5 7.5 12 7.5L9.5 7 5.5 12 3.5 12 5.5 7"/>
-                </svg>
-                <svg v-else viewBox="0 0 14 14" fill="none"
-                     stroke="#0097A7" stroke-width="1.6" stroke-linecap="round">
-                  <path d="M1 10.5 C3.5 8.5 5.5 8.5 7 10.5 C8.5 12.5 10.5 12.5 13 10.5"/>
-                  <path d="M2.5 4.5 L5 4.5 L5 2.5 L9 2.5 L9 4.5 L11.5 4.5 L11.5 8.5 L2.5 8.5 Z"/>
-                </svg>
-              </div>
-              <div class="dc-body">
-                <span class="dc-lbl">Transport Mode</span>
-                <span class="dc-val">{{ transportLabel(selectedPoe.transport_mode) }}</span>
+              <div class="pd-flag-card" :class="selectedPoe.is_national_level ? 'pd-flag-card--on pd-flag-card--national' : 'pd-flag-card--off'">
+                <div class="pd-flag-card-shine"/>
+                <div class="pd-flag-icon">🏛</div>
+                <div class="pd-flag-label">National Level</div>
+                <div class="pd-flag-status">{{ selectedPoe.is_national_level ? 'NATIONAL PHEOC' : 'SUB-NATIONAL' }}</div>
+                <div class="pd-flag-desc">{{ selectedPoe.is_national_level ? 'Reports directly to National PHEOC. Highest alert routing.' : 'Reports through RPHEOC hierarchy.' }}</div>
               </div>
             </div>
           </div>
 
-          <!-- Critical details panel (if present) -->
-          <div v-if="selectedPoe.critical_details" class="critical-panel">
-            <div class="cp-header" aria-hidden="true">
-              <svg viewBox="0 0 14 14" fill="none" stroke="#1565C0" stroke-width="1.6" stroke-linecap="round">
-                <circle cx="7" cy="7" r="5.5"/>
-                <line x1="7" y1="5" x2="7" y2="7.5"/>
-                <circle cx="7" cy="10" r=".8" fill="#1565C0"/>
-              </svg>
-              <span class="cp-hdr-txt">Operational Notes</span>
+          <!-- ── 3. NETWORK POSITION ───────────────────────────── -->
+          <div class="pd-section">
+            <div class="pd-section-label">
+              <div class="pd-section-glyph">📡</div>
+              NETWORK POSITION
             </div>
-            <p class="cp-body">{{ selectedPoe.critical_details }}</p>
-          </div>
+            <div class="pd-network-card">
+              <div class="pd-network-card-shine"/>
+              <div class="pd-network-stats">
+                <div class="pd-net-stat">
+                  <div class="pd-net-stat-n">{{ allPoes.length }}</div>
+                  <div class="pd-net-stat-l">National POEs</div>
+                </div>
+                <div class="pd-net-stat-sep"/>
+                <div class="pd-net-stat">
+                  <div class="pd-net-stat-n">{{ siblingsByRpheoc.length }}</div>
+                  <div class="pd-net-stat-l">Same RPHEOC</div>
+                </div>
+                <div class="pd-net-stat-sep"/>
+                <div class="pd-net-stat">
+                  <div class="pd-net-stat-n">{{ siblingsByDistrict.length }}</div>
+                  <div class="pd-net-stat-l">Same District</div>
+                </div>
+                <div class="pd-net-stat-sep"/>
+                <div class="pd-net-stat">
+                  <div class="pd-net-stat-n" :class="'pd-net-mode--' + (selectedPoe.transport_mode || 'land')">
+                    {{ transportLabel(selectedPoe.transport_mode) }}
+                  </div>
+                  <div class="pd-net-stat-l">Mode</div>
+                </div>
+              </div>
 
-          <!-- ── Section 4: Reference Data ── -->
-          <div class="modal-section-hdr">
-            <div class="msh-num msh-purple">4</div>
-            <span class="msh-title">Reference Data Identifiers</span>
-            <span class="msh-readonly-note">Reference data — app v{{ refDataVersion }}</span>
-          </div>
-
-          <div class="detail-card">
-            <div class="dc-row">
-              <div class="dc-ic dc-ic--grey" aria-hidden="true">
-                <svg viewBox="0 0 14 14" fill="none" stroke="#78909C" stroke-width="1.6" stroke-linecap="round">
-                  <rect x="1.5" y="1.5" width="11" height="11" rx="2"/>
-                  <path d="M4 5h6M4 7.5h4M4 10h5"/>
-                </svg>
-              </div>
-              <div class="dc-body">
-                <span class="dc-lbl">Record ID (POES.js)</span>
-                <span class="dc-val dc-val--mono">{{ selectedPoe.id }}</span>
-              </div>
-            </div>
-
-            <div v-if="selectedPoe.poe_code" class="dc-row">
-              <div class="dc-ic dc-ic--blue" aria-hidden="true">
-                <svg viewBox="0 0 14 14" fill="none" stroke="#1565C0" stroke-width="1.6" stroke-linecap="round">
-                  <path d="M2 4l3-2.5 2 2 3-2.5L12 3"/><path d="M2 4v7l3 1.5 2-2 3 2 2-1.5V3"/>
-                  <line x1="5" y1="1.5" x2="5" y2="12.5"/><line x1="7" y1="3.5" x2="7" y2="13.5"/>
-                </svg>
-              </div>
-              <div class="dc-body">
-                <span class="dc-lbl">POE Code (Database)</span>
-                <span class="dc-val dc-val--mono dc-val--blue">{{ selectedPoe.poe_code }}</span>
-              </div>
-            </div>
-
-            <div v-if="selectedPoe.source_url" class="dc-row">
-              <div class="dc-ic dc-ic--teal" aria-hidden="true">
-                <svg viewBox="0 0 14 14" fill="none" stroke="#0097A7" stroke-width="1.6" stroke-linecap="round">
-                  <path d="M6 8L2 12"/><path d="M8 6l4-4"/>
-                  <path d="M10 2h2v2"/><path d="M2 10v2h2"/>
-                  <path d="M5 5l4 4"/>
-                </svg>
-              </div>
-              <div class="dc-body">
-                <span class="dc-lbl">Source Reference</span>
-                <span class="dc-val dc-val--link dc-val--mono">{{ selectedPoe.source_url }}</span>
-              </div>
-            </div>
-
-            <div class="dc-row">
-              <div class="dc-ic dc-ic--grey" aria-hidden="true">
-                <svg viewBox="0 0 14 14" fill="none" stroke="#78909C" stroke-width="1.6" stroke-linecap="round">
-                  <circle cx="7" cy="7" r="5.5"/>
-                  <polyline points="7 4 7 7.5 9.5 9"/>
-                </svg>
-              </div>
-              <div class="dc-body">
-                <span class="dc-lbl">Data Origin</span>
-                <span class="dc-val">{{ selectedPoe.source_origin || 'POES.js Reference File' }}</span>
+              <!-- Reporting chain -->
+              <div class="pd-chain">
+                <div class="pd-chain-label">IHR REPORTING CHAIN</div>
+                <div class="pd-chain-nodes">
+                  <div class="pd-chain-node pd-chain-node--poe">
+                    <div class="pd-chain-dot pd-chain-dot--active"/>
+                    <span>This POE</span>
+                  </div>
+                  <div class="pd-chain-arrow">→</div>
+                  <div class="pd-chain-node">
+                    <div class="pd-chain-dot"/>
+                    <span>{{ selectedPoe.admin_level_1 || 'RPHEOC' }}</span>
+                  </div>
+                  <div class="pd-chain-arrow">→</div>
+                  <div class="pd-chain-node">
+                    <div class="pd-chain-dot"/>
+                    <span>National PHEOC</span>
+                  </div>
+                  <div class="pd-chain-arrow">→</div>
+                  <div class="pd-chain-node">
+                    <div class="pd-chain-dot"/>
+                    <span>WHO IHR FP</span>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
 
-          <!-- IHR notice -->
-          <div class="ihr-notice" role="note" aria-label="IHR notice">
-            <div class="ihr-notice-icon" aria-hidden="true">
-              <svg viewBox="0 0 16 16" fill="none" stroke="#1565C0" stroke-width="1.6" stroke-linecap="round">
-                <path d="M8 1L1.5 4.5v5C1.5 13 5 15.5 8 16.5c3-1 6.5-3.5 6.5-7v-5L8 1z"/>
-                <polyline points="5.5 8 7 9.5 10.5 6"/>
-              </svg>
+          <!-- ── 4. SIBLING POEs (same RPHEOC) ─────────────────── -->
+          <div v-if="siblingsByRpheoc.length > 0" class="pd-section">
+            <div class="pd-section-label">
+              <div class="pd-section-glyph">🔗</div>
+              OTHER POEs IN {{ (selectedPoe.admin_level_1 || 'THIS RPHEOC').toUpperCase() }}
             </div>
-            <div class="ihr-notice-body">
-              <span class="ihr-notice-title">WHO / IHR 2005 · Article 23</span>
-              <span class="ihr-notice-sub">
-                This POE is part of the national IHR surveillance network.
-                Reference data is hardcoded in the app and does not require network access.
-                Codes stored here match the poe_code column in all screening records.
-              </span>
+            <div class="pd-siblings">
+              <div
+                v-for="sib in siblingsByRpheoc.slice(0, 8)"
+                :key="sib.id"
+                class="pd-sibling-card"
+                @click="selectedPoe = sib"
+                role="button"
+                tabindex="0"
+              >
+                <div class="pd-sibling-bar" :class="'pd-sib-bar--' + (sib.transport_mode || 'land')"/>
+                <div class="pd-sibling-body">
+                  <div class="pd-sibling-name">{{ sib.poe_name }}</div>
+                  <div class="pd-sibling-meta">{{ sib.district }} · {{ transportLabel(sib.transport_mode) }}</div>
+                </div>
+                <div class="pd-sibling-badges">
+                  <span v-if="sib.is_major_entry" class="pd-sib-badge pd-sib-badge--major">M</span>
+                  <span v-if="sib.is_recommended_osbp" class="pd-sib-badge pd-sib-badge--osbp">O</span>
+                </div>
+              </div>
+              <div v-if="siblingsByRpheoc.length > 8" class="pd-siblings-more">
+                +{{ siblingsByRpheoc.length - 8 }} more in this RPHEOC
+              </div>
             </div>
           </div>
 
-          <!-- Bottom spacer -->
-          <div style="height: 32px;" aria-hidden="true" />
+          <!-- ── 5. OPERATIONAL INTELLIGENCE ───────────────────── -->
+          <div class="pd-section">
+            <div class="pd-section-label">
+              <div class="pd-section-glyph">⚙</div>
+              OPERATIONAL INTELLIGENCE
+            </div>
+
+            <div class="pd-ops-grid">
+              <div class="pd-ops-card">
+                <div class="pd-ops-card-shine"/>
+                <div class="pd-ops-label">POE Type</div>
+                <div class="pd-ops-value">{{ formatPoeType(selectedPoe.poe_type) }}</div>
+                <div class="pd-ops-sub">{{ selectedPoe.poe_type }}</div>
+              </div>
+              <div class="pd-ops-card">
+                <div class="pd-ops-card-shine"/>
+                <div class="pd-ops-label">Transport Mode</div>
+                <div class="pd-ops-value" :class="'pd-ops-mode--' + (selectedPoe.transport_mode || 'land')">{{ transportLabel(selectedPoe.transport_mode) }}</div>
+                <div class="pd-ops-sub">Primary screening mode</div>
+              </div>
+              <div class="pd-ops-card">
+                <div class="pd-ops-card-shine"/>
+                <div class="pd-ops-label">Country</div>
+                <div class="pd-ops-value">🇺🇬 Uganda</div>
+                <div class="pd-ops-sub">Active IHR State Party</div>
+              </div>
+              <div class="pd-ops-card">
+                <div class="pd-ops-card-shine"/>
+                <div class="pd-ops-label">Data Origin</div>
+                <div class="pd-ops-value" style="font-size:12px;">{{ selectedPoe.source_origin || 'POES.js Reference File' }}</div>
+                <div class="pd-ops-sub">Hardcoded — offline capable</div>
+              </div>
+            </div>
+
+            <!-- Critical / operational notes -->
+            <div v-if="selectedPoe.critical_details" class="pd-notes-card">
+              <div class="pd-notes-card-shine"/>
+              <div class="pd-notes-hdr">
+                <span class="pd-notes-ic">📋</span>
+                <span class="pd-notes-title">Operational Notes</span>
+              </div>
+              <div class="pd-notes-text">{{ selectedPoe.critical_details }}</div>
+            </div>
+
+            <!-- Traveler tip if this POE matches -->
+            <div v-if="travelerTip" class="pd-traveler-tip">
+              <div class="pd-traveler-tip-shine"/>
+              <div class="pd-traveler-hdr">✈ ROUTE TIP</div>
+              <div class="pd-traveler-text">{{ travelerTip }}</div>
+            </div>
+          </div>
+
+          <!-- ── 6. REFERENCE DATA IDENTIFIERS ──────────────────── -->
+          <div class="pd-section">
+            <div class="pd-section-label">
+              <div class="pd-section-glyph">🔑</div>
+              REFERENCE DATA IDENTIFIERS
+            </div>
+
+            <div class="pd-ref-table">
+              <div class="pd-ref-row">
+                <span class="pd-ref-key">Record ID (POES.js)</span>
+                <code class="pd-ref-val pd-ref-val--id">{{ selectedPoe.id }}</code>
+              </div>
+              <div v-if="selectedPoe.poe_code" class="pd-ref-row">
+                <span class="pd-ref-key">POE Code (DB primary)</span>
+                <code class="pd-ref-val pd-ref-val--code">{{ selectedPoe.poe_code }}</code>
+              </div>
+              <div v-if="selectedPoe.poe_name" class="pd-ref-row">
+                <span class="pd-ref-key">POE Name (DB field)</span>
+                <code class="pd-ref-val">{{ selectedPoe.poe_name }}</code>
+              </div>
+              <div class="pd-ref-row">
+                <span class="pd-ref-key">Province Code (record stamp)</span>
+                <code class="pd-ref-val">{{ selectedPoe.province }}</code>
+              </div>
+              <div class="pd-ref-row">
+                <span class="pd-ref-key">District Code (record stamp)</span>
+                <code class="pd-ref-val">{{ selectedPoe.district }}</code>
+              </div>
+              <div class="pd-ref-row">
+                <span class="pd-ref-key">Admin Level 1</span>
+                <code class="pd-ref-val">{{ selectedPoe.admin_level_1 }}</code>
+              </div>
+              <div class="pd-ref-row">
+                <span class="pd-ref-key">Admin Level 1 Type</span>
+                <code class="pd-ref-val">{{ selectedPoe.admin_level_1_type }}</code>
+              </div>
+              <div v-if="selectedPoe.regional_cluster_or_rpheoc" class="pd-ref-row">
+                <span class="pd-ref-key">RPHEOC Cluster</span>
+                <code class="pd-ref-val">{{ selectedPoe.regional_cluster_or_rpheoc }}</code>
+              </div>
+              <div v-if="selectedPoe.source_province_group" class="pd-ref-row">
+                <span class="pd-ref-key">Source Province Group</span>
+                <code class="pd-ref-val">{{ selectedPoe.source_province_group }}</code>
+              </div>
+              <div v-if="selectedPoe.source_url" class="pd-ref-row">
+                <span class="pd-ref-key">Source Reference</span>
+                <code class="pd-ref-val pd-ref-val--url">{{ selectedPoe.source_url }}</code>
+              </div>
+            </div>
+          </div>
+
+          <!-- ── 7. DATA PROVENANCE ──────────────────────────────── -->
+          <div class="pd-section">
+            <div class="pd-section-label">
+              <div class="pd-section-glyph">📊</div>
+              DATASET PROVENANCE
+            </div>
+            <div class="pd-provenance-card">
+              <div class="pd-provenance-card-shine"/>
+              <div class="pd-prov-row">
+                <span class="pd-prov-key">Dataset</span>
+                <span class="pd-prov-val">{{ metadata.dataset_name }}</span>
+              </div>
+              <div class="pd-prov-row">
+                <span class="pd-prov-key">Schema version</span>
+                <code class="pd-prov-code">{{ metadata.schema_version }}</code>
+              </div>
+              <div class="pd-prov-row">
+                <span class="pd-prov-key">Created</span>
+                <span class="pd-prov-val">{{ metadata.created_from_user_supplied_text_on }}</span>
+              </div>
+              <div class="pd-prov-row">
+                <span class="pd-prov-key">Uganda POEs total</span>
+                <span class="pd-prov-val">{{ metadata.country_entry_counts?.Uganda || 44 }}</span>
+              </div>
+              <div class="pd-prov-row">
+                <span class="pd-prov-key">App ref version</span>
+                <code class="pd-prov-code">rda-2026-02-01</code>
+              </div>
+            </div>
+
+            <!-- Data quality notes -->
+            <div v-if="metadata.data_quality_notes?.length" class="pd-quality-notes">
+              <div class="pd-quality-hdr">DATA QUALITY NOTES</div>
+              <div v-for="(note, i) in metadata.data_quality_notes" :key="i" class="pd-quality-row">
+                <span class="pd-quality-num">{{ i + 1 }}</span>
+                <span class="pd-quality-text">{{ note }}</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- ── 8. IHR COMPLIANCE BLOCK ─────────────────────────── -->
+          <div class="pd-section">
+            <div class="pd-section-label">
+              <div class="pd-section-glyph">🛡</div>
+              WHO / IHR 2005 COMPLIANCE
+            </div>
+            <div class="pd-ihr-block">
+              <div class="pd-ihr-block-shine"/>
+              <div class="pd-ihr-title">IHR 2005 · Article 23 — Health Measures on Arrival and Departure</div>
+              <div class="pd-ihr-text">
+                This Point of Entry is part of the Uganda national IHR surveillance network. It operates under IHR 2005 Article 23, which grants States Parties the authority to require health measures for travelers. Primary screening at this POE implements Annex 1B capacity requirements. All records captured here are stamped with this POE's geographic codes and are subject to the national IDSR reporting pathway.
+              </div>
+              <div class="pd-ihr-articles">
+                <div class="pd-ihr-article">
+                  <span class="pd-ihr-art-num">Art. 23</span>
+                  <span class="pd-ihr-art-text">Health measures on arrival and departure</span>
+                </div>
+                <div class="pd-ihr-article">
+                  <span class="pd-ihr-art-num">Annex 1B</span>
+                  <span class="pd-ihr-art-text">Core capacity requirements for designated POEs</span>
+                </div>
+                <div class="pd-ihr-article">
+                  <span class="pd-ihr-art-num">Art. 44</span>
+                  <span class="pd-ihr-art-text">Collaborate in detection and response to PHEIC</span>
+                </div>
+              </div>
+              <div class="pd-ihr-offline-notice">
+                <span class="pd-ihr-offline-dot"/>
+                Reference data is hardcoded in the app and does not require network access. poe_code in all screening records must exactly match this entry's poe_code field.
+              </div>
+            </div>
+          </div>
+
         </div>
+
+        <div style="height: max(env(safe-area-inset-bottom, 0px), 40px);" aria-hidden="true"/>
       </IonContent>
     </IonModal>
 
@@ -638,64 +701,34 @@
 
 <script setup>
 /**
- * PoesView.vue — Points of Entry Reference View
- *
- * READ-ONLY. All data sourced from window.POE_MAIN (POES.js).
- * No poeDB interaction — this view has zero IndexedDB operations.
- * No TypeScript — pure JavaScript as per project standards.
- *
- * Data flow:
- *   window.POE_MAIN.poes  →  allPoes (computed)
- *                         →  filteredPoes (search + filters)
- *                         →  groupedPoes (grouped by admin_level_1)
- *
- * Filters:
- *   activeCountry: 'ALL' | 'Rwanda' | 'Uganda'
- *   activeMode:    'ALL' | 'land' | 'air' | 'water'
- *   activeFlag:    'ALL' | 'major' | 'osbp' | 'national'
- *   searchQuery:   free-text against poe_name, district, province, poe_code, id
+ * POEs.vue — Points of Entry Reference View
+ * READ-ONLY · No poeDB · No TypeScript · No network calls
+ * Data: window.POE_MAIN (POES.js) — hardcoded reference data
  */
-
 import { ref, computed } from 'vue'
 import {
   IonPage, IonHeader, IonToolbar, IonTitle, IonButtons, IonBackButton,
-  IonContent, IonRefresher, IonRefresherContent, IonModal,
+  IonContent, IonRefresher, IonRefresherContent, IonModal, IonButton, IonIcon,
+  onIonViewDidEnter,
 } from '@ionic/vue'
+import { closeOutline } from 'ionicons/icons'
 
-// ─────────────────────────────────────────────────────────────────────────
-// CONSTANTS
-// ─────────────────────────────────────────────────────────────────────────
-
-const refDataVersion = 'rda-2026-02-01'
-
-// ─────────────────────────────────────────────────────────────────────────
-// STATE
-// ─────────────────────────────────────────────────────────────────────────
-
+// ── State ────────────────────────────────────────────────────────────────
 const searchQuery = ref('')
 const activeMode  = ref('ALL')
 const activeFlag  = ref('ALL')
 const selectedPoe = ref(null)
 
-// ─────────────────────────────────────────────────────────────────────────
-// RAW DATA — window.POE_MAIN (POES.js)
-// ─────────────────────────────────────────────────────────────────────────
-
-/**
- * allPoes — Uganda POEs only, sourced from window.POE_MAIN (POES.js).
- * Hardcoded to Uganda: this app operates within the Uganda national hierarchy.
- * Safe accessor: returns [] if the global is not yet loaded.
- */
+// ── Data from window.POE_MAIN ─────────────────────────────────────────────
 const allPoes = computed(() => {
-  const data = window.POE_MAIN
-  if (!data || !Array.isArray(data.poes)) return []
-  return data.poes.filter(p => p.country === 'Uganda')
+  const D = window.POE_MAIN
+  if (!D || !Array.isArray(D.poes)) return []
+  return D.poes.filter(p => p.country === 'Uganda')
 })
 
-// ─────────────────────────────────────────────────────────────────────────
-// AGGREGATE COUNTS (for stats strip + chip counts)
-// ─────────────────────────────────────────────────────────────────────────
+const metadata = computed(() => window.POE_MAIN?.metadata || {})
 
+// ── Counts ────────────────────────────────────────────────────────────────
 const landCount     = computed(() => allPoes.value.filter(p => p.transport_mode === 'land').length)
 const airCount      = computed(() => allPoes.value.filter(p => p.transport_mode === 'air').length)
 const waterCount    = computed(() => allPoes.value.filter(p => p.transport_mode === 'water').length)
@@ -703,1228 +736,528 @@ const majorCount    = computed(() => allPoes.value.filter(p => p.is_major_entry)
 const osbpCount     = computed(() => allPoes.value.filter(p => p.is_recommended_osbp).length)
 const nationalCount = computed(() => allPoes.value.filter(p => p.is_national_level).length)
 
-// ─────────────────────────────────────────────────────────────────────────
-// FILTER DEFINITIONS
-// ─────────────────────────────────────────────────────────────────────────
-
-const modeFilters = [
-  { value: 'ALL',   label: 'All Modes', color: 'all' },
-  { value: 'land',  label: 'Land',      color: 'land' },
-  { value: 'air',   label: 'Air',       color: 'air' },
-  { value: 'water', label: 'Water',     color: 'water' },
-]
-
-const flagFilters = computed(() => [
-  { value: 'ALL',      label: 'All Types', color: 'all',      count: allPoes.value.length },
-  { value: 'major',    label: 'Major',     color: 'major',    count: majorCount.value },
-  { value: 'osbp',     label: 'OSBP',      color: 'osbp',     count: osbpCount.value },
-  { value: 'national', label: 'National',  color: 'national', count: nationalCount.value },
+// ── Filters ───────────────────────────────────────────────────────────────
+const modeFilters = computed(() => [
+  { value: 'ALL',   label: 'All',   color: 'all',   count: allPoes.value.length },
+  { value: 'land',  label: 'Land',  color: 'land',  count: landCount.value },
+  { value: 'air',   label: 'Air',   color: 'air',   count: airCount.value },
+  { value: 'water', label: 'Water', color: 'water', count: waterCount.value },
 ])
 
-// ─────────────────────────────────────────────────────────────────────────
-// FILTERED DATA
-// ─────────────────────────────────────────────────────────────────────────
+const flagFilters = computed(() => [
+  { value: 'ALL',      label: 'All Types', count: allPoes.value.length },
+  { value: 'major',    label: 'Major',     count: majorCount.value },
+  { value: 'osbp',     label: 'OSBP',      count: osbpCount.value },
+  { value: 'national', label: 'National',  count: nationalCount.value },
+])
+
+const hasActiveFilters = computed(() =>
+  activeMode.value !== 'ALL' || activeFlag.value !== 'ALL' || !!searchQuery.value.trim()
+)
 
 const filteredPoes = computed(() => {
   let list = allPoes.value
-
-  // Transport mode filter
-  if (activeMode.value !== 'ALL') {
-    list = list.filter(p => p.transport_mode === activeMode.value)
-  }
-
-  // Special flag filter
-  if (activeFlag.value === 'major') {
-    list = list.filter(p => p.is_major_entry === true)
-  } else if (activeFlag.value === 'osbp') {
-    list = list.filter(p => p.is_recommended_osbp === true)
-  } else if (activeFlag.value === 'national') {
-    list = list.filter(p => p.is_national_level === true)
-  }
-
-  // Full-text search
+  if (activeMode.value !== 'ALL') list = list.filter(p => p.transport_mode === activeMode.value)
+  if (activeFlag.value === 'major')    list = list.filter(p => p.is_major_entry)
+  if (activeFlag.value === 'osbp')     list = list.filter(p => p.is_recommended_osbp)
+  if (activeFlag.value === 'national') list = list.filter(p => p.is_national_level)
   const q = searchQuery.value.trim().toLowerCase()
-  if (q) {
-    list = list.filter(p => {
-      return (
-        (p.poe_name     || '').toLowerCase().includes(q) ||
-        (p.district     || '').toLowerCase().includes(q) ||
-        (p.province     || '').toLowerCase().includes(q) ||
-        (p.poe_code     || '').toLowerCase().includes(q) ||
-        (p.id           || '').toLowerCase().includes(q) ||
-        (p.border_country || '').toLowerCase().includes(q) ||
-        (p.admin_level_1  || '').toLowerCase().includes(q) ||
-        (p.regional_cluster_or_rpheoc || '').toLowerCase().includes(q)
-      )
-    })
-  }
-
+  if (q) list = list.filter(p =>
+    (p.poe_name || '').toLowerCase().includes(q) ||
+    (p.district || '').toLowerCase().includes(q) ||
+    (p.province || '').toLowerCase().includes(q) ||
+    (p.poe_code || '').toLowerCase().includes(q) ||
+    (p.admin_level_1 || '').toLowerCase().includes(q) ||
+    (p.border_country || '').toLowerCase().includes(q) ||
+    (p.regional_cluster_or_rpheoc || '').toLowerCase().includes(q)
+  )
   return list
 })
 
-/**
- * groupedPoes — filtered list grouped by admin_level_1.
- * Returns array of { admin_level_1, type, country, poes[] } sorted by country then name.
- */
 const groupedPoes = computed(() => {
   const groups = {}
-
   for (const poe of filteredPoes.value) {
     const key = poe.admin_level_1 || poe.province || 'Unknown'
-    if (!groups[key]) {
-      groups[key] = {
-        admin_level_1: key,
-        type: poe.admin_level_1_type || 'province',
-        country: poe.country,
-        poes: [],
-      }
-    }
+    if (!groups[key]) groups[key] = { admin_level_1: key, type: poe.admin_level_1_type || 'province', poes: [] }
     groups[key].poes.push(poe)
   }
-
-  // Sort groups alphabetically by RPHEOC / province name
-  return Object.values(groups).sort((a, b) =>
-    a.admin_level_1.localeCompare(b.admin_level_1)
-  )
+  return Object.values(groups).sort((a, b) => a.admin_level_1.localeCompare(b.admin_level_1))
 })
 
-// ─────────────────────────────────────────────────────────────────────────
-// FILTER STATE
-// ─────────────────────────────────────────────────────────────────────────
-
-const hasActiveFilters = computed(() => {
-  return activeMode.value !== 'ALL'    ||
-         activeFlag.value !== 'ALL'    ||
-         searchQuery.value.trim() !== ''
+// ── Modal computed ────────────────────────────────────────────────────────
+const siblingsByRpheoc = computed(() => {
+  if (!selectedPoe.value) return []
+  const key = selectedPoe.value.admin_level_1 || selectedPoe.value.province
+  return allPoes.value.filter(p => (p.admin_level_1 || p.province) === key && p.id !== selectedPoe.value.id)
 })
 
-// ─────────────────────────────────────────────────────────────────────────
-// ACTIONS
-// ─────────────────────────────────────────────────────────────────────────
+const siblingsByDistrict = computed(() => {
+  if (!selectedPoe.value) return []
+  return allPoes.value.filter(p => p.district === selectedPoe.value.district && p.id !== selectedPoe.value.id)
+})
 
-function setMode(val) {
-  activeMode.value = val
-}
-
-function setFlag(val) {
-  activeFlag.value = val
-}
-
-function clearAllFilters() {
-  activeMode.value  = 'ALL'
-  activeFlag.value  = 'ALL'
-  searchQuery.value = ''
-}
-
-function openDetail(poe) {
-  selectedPoe.value = poe
-}
-
-function handleRefresh(event) {
-  // Reference data is hardcoded — nothing to fetch.
-  // Reset filters to give the "refreshed" experience, then complete spinner.
-  setTimeout(() => {
-    event.target.complete()
-  }, 400)
-}
-
-// ─────────────────────────────────────────────────────────────────────────
-// DISPLAY HELPERS
-// ─────────────────────────────────────────────────────────────────────────
-
-function transportLabel(mode) {
-  const labels = { land: 'Land', air: 'Air', water: 'Water', sea: 'Sea' }
-  return labels[mode] || (mode ? String(mode).charAt(0).toUpperCase() + mode.slice(1) : 'Land')
-}
-
-function formatPoeType(type) {
-  const labels = {
-    airport:     'International Airport',
-    airstrip:    'Airstrip',
-    land_border: 'Land Border',
-    port:        'Lake / River Port',
-    island_entry: 'Island Entry',
-    sea_port:    'Sea Port',
+const travelerTip = computed(() => {
+  if (!selectedPoe.value || !window.POE_MAIN?.traveler_notes) return null
+  const notes = window.POE_MAIN.traveler_notes
+  for (const key of Object.keys(notes)) {
+    if (notes[key].recommended_poe === selectedPoe.value.poe_name) return notes[key].note
   }
-  if (!type) return 'Border Post'
-  return labels[type] || type.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+  return null
+})
+
+// ── Actions ───────────────────────────────────────────────────────────────
+function clearFilters() { activeMode.value = 'ALL'; activeFlag.value = 'ALL'; searchQuery.value = '' }
+function openDetail(poe) { selectedPoe.value = poe }
+
+// ── Helpers ───────────────────────────────────────────────────────────────
+function transportLabel(m) {
+  return { land: 'Land', air: 'Air', water: 'Water', sea: 'Sea' }[m] || (m ? m[0].toUpperCase() + m.slice(1) : 'Land')
+}
+function formatPoeType(t) {
+  const map = {
+    airport: 'International Airport', airstrip: 'Airstrip',
+    land_border: 'Land Border Post', port: 'Lake / River Port',
+    island_entry: 'Island Entry Point', sea_port: 'Sea Port',
+  }
+  if (!t) return 'Border Post'
+  return map[t] || t.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
 }
 </script>
 
 <style scoped>
-/* ══════════════════════════════════════════════════════════════════════════
-   SENTINEL DESIGN SYSTEM — Light Theme
-   Palette: #0D47A1 / #1565C0 header · #EEF2FF bg · #FFFFFF cards · #E3EAF8 borders
-   Fonts:   Syne (numbers / headings) · DM Sans (body)
-   NO DARK MODE — light theming throughout
-══════════════════════════════════════════════════════════════════════════ */
-
-/* ── Toolbar / Header ── */
-.poe-hdr {
-  --background: transparent;
-}
-
-.poe-toolbar {
-  --background: linear-gradient(180deg, #0D47A1 0%, #1565C0 100%);
-  --border-width: 0;
-  --min-height: 56px;
-  position: relative;
-  overflow: hidden;
-}
-
-.poe-toolbar::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background:
-    radial-gradient(ellipse at 85% 20%, rgba(255,255,255,.07), transparent 55%),
-    radial-gradient(ellipse at 10% 80%, rgba(255,255,255,.04), transparent 40%);
-  pointer-events: none;
-}
-
-/* Back button */
-.poe-back-btn {
-  --color: rgba(255,255,255,.85);
-  --icon-font-size: 22px;
-}
-
-/* Title block */
-.hdr-title-block {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 1px;
-}
-
-.hdr-eyebrow {
-  font-size: 9px;
-  font-weight: 700;
-  letter-spacing: 2px;
-  text-transform: uppercase;
-  color: rgba(255,255,255,.5);
-  line-height: 1;
-}
-
-.hdr-main-title {
-  --color: #ffffff;
-  font-family: 'Syne', -apple-system, sans-serif;
-  font-size: 18px;
-  font-weight: 800;
-  letter-spacing: -.3px;
-  line-height: 1.15;
-  padding: 0;
-}
-
-/* POE count badge */
-.hdr-count-badge {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 0;
-  background: rgba(255,255,255,.12);
-  border: 1px solid rgba(255,255,255,.18);
-  border-radius: 10px;
-  padding: 5px 10px;
-  margin-right: 4px;
-}
-
-.hdr-count-num {
-  font-family: 'Syne', sans-serif;
-  font-size: 18px;
-  font-weight: 800;
-  color: #fff;
-  line-height: 1;
-  letter-spacing: -.5px;
-}
-
-.hdr-count-lbl {
-  font-size: 8px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: .8px;
-  color: rgba(255,255,255,.55);
-  margin-top: 1px;
-}
-
-/* ── Stats Strip ── */
-.stats-strip {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  background: rgba(255,255,255,.08);
-  border-top: 1px solid rgba(255,255,255,.1);
-  overflow: hidden;
-}
-
-.ss-cell {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding: 8px 4px 9px;
-  position: relative;
-}
-
-.ss-cell:not(:last-child)::after {
-  content: '';
-  position: absolute;
-  right: 0;
-  top: 20%;
-  height: 60%;
-  width: 1px;
-  background: rgba(255,255,255,.15);
-}
-
-.ss-num {
-  font-family: 'Syne', sans-serif;
-  font-size: 21px;
-  font-weight: 800;
-  color: #fff;
-  line-height: 1;
-  letter-spacing: -.5px;
-}
-
-.ss-num--land  { color: #81C784; }
-.ss-num--air   { color: #90CAF9; }
-.ss-num--water { color: #4DD0E1; }
-
-.ss-lbl {
-  font-size: 8.5px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: .7px;
-  color: rgba(255,255,255,.5);
-  margin-top: 2px;
-}
-
-/* ── Search Area ── */
-.search-area {
-  background: #1565C0;
-  padding: 8px 14px 6px;
-}
-
-.search-wrap {
-  background: rgba(255,255,255,.13);
-  border: 1px solid rgba(255,255,255,.18);
-  border-radius: 13px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 0 12px;
-  height: 42px;
-}
-
-.search-ic {
-  width: 16px;
-  height: 16px;
-  flex-shrink: 0;
-  stroke: rgba(255,255,255,.6);
-}
-
-.search-input {
-  flex: 1;
-  background: transparent;
-  border: none;
-  outline: none;
-  font-size: 14px;
-  font-weight: 400;
-  color: #fff;
-  font-family: 'DM Sans', -apple-system, sans-serif;
-  caret-color: rgba(255,255,255,.8);
-}
-
-.search-input::placeholder {
-  color: rgba(255,255,255,.45);
-}
-
-.search-clear-btn {
-  width: 24px;
-  height: 24px;
-  border-radius: 50%;
-  background: rgba(255,255,255,.15);
-  border: none;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0;
-  flex-shrink: 0;
-  cursor: pointer;
-}
-
-.search-clear-btn svg {
-  width: 12px;
-  height: 12px;
-  stroke: rgba(255,255,255,.7);
-}
-
-/* ── Filter Chip Rows ── */
-.chip-row {
-  background: #1565C0;
-  padding: 0 12px 8px;
-  display: flex;
-  gap: 6px;
-  overflow-x: auto;
-  scrollbar-width: none;
-  -webkit-overflow-scrolling: touch;
-}
-
-.chip-row::-webkit-scrollbar { display: none; }
-.chip-row--modes { padding-top: 0; }
-.chip-row--flags { padding-bottom: 10px; }
-
-/* Base chip */
-.f-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 5px 11px;
-  border-radius: 20px;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: .3px;
-  white-space: nowrap;
-  border: 1.5px solid;
-  flex-shrink: 0;
-  cursor: pointer;
-  transition: all .12s ease;
-  /* Default inactive state — subtle on the blue header */
-  background: rgba(255,255,255,.08);
-  border-color: rgba(255,255,255,.18);
-  color: rgba(255,255,255,.65);
-}
-
-.chip-flag { font-size: 13px; line-height: 1; }
-
-.chip-ic {
-  width: 13px;
-  height: 13px;
-  flex-shrink: 0;
-  stroke: currentColor;
-}
-
-.chip-lbl { line-height: 1; }
-
-.chip-count {
-  min-width: 18px;
-  height: 16px;
-  border-radius: 8px;
-  font-size: 9px;
-  font-weight: 800;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0 4px;
-  background: rgba(255,255,255,.15);
-  color: rgba(255,255,255,.75);
-}
-
-/* Active state — white filled */
-.f-chip--active {
-  background: rgba(255,255,255,.95) !important;
-  border-color: #fff !important;
-  color: #0D47A1 !important;
-}
-
-.f-chip--active .chip-count {
-  background: #E3F2FD;
-  color: #1565C0;
-}
-
-/* ── IonContent ── */
-.poe-content {
-  --background: #EEF2FF;
-}
-
-/* ── Empty State ── */
-.empty-state {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 64px 32px 48px;
-  text-align: center;
-}
-
-.empty-icon-wrap {
-  width: 80px;
-  height: 80px;
-  border-radius: 24px;
-  background: #E3F2FD;
-  border: 1px solid #BBDEFB;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin-bottom: 20px;
-}
-
-.empty-icon {
-  width: 44px;
-  height: 44px;
-}
-
-.empty-title {
-  font-family: 'Syne', sans-serif;
-  font-size: 18px;
-  font-weight: 800;
-  color: #0D1B3E;
-  letter-spacing: -.3px;
-  margin-bottom: 8px;
-}
-
-.empty-sub {
-  font-size: 13px;
-  color: #78909C;
-  line-height: 1.5;
-  max-width: 260px;
-  margin-bottom: 24px;
-}
-
-.empty-clear-btn {
-  height: 42px;
-  padding: 0 22px;
-  border-radius: 13px;
-  background: #0D47A1;
-  color: #fff;
-  border: none;
-  font-size: 13px;
-  font-weight: 700;
-  letter-spacing: .2px;
-  cursor: pointer;
-}
-
-/* ── POE List ── */
-.poe-list {
-  padding: 8px 0 0;
-}
-
-.list-bottom-pad {
-  height: 40px;
-}
-
-/* ── Section Header ── */
-.section-hdr {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 10px 16px 5px;
-}
-
-.sh-left {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.sh-type-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-
-.sh-dot--pheoc    { background: #6A1B9A; }
-.sh-dot--province { background: #0D47A1; }
-
-.sh-label {
-  font-size: 11px;
-  font-weight: 800;
-  text-transform: uppercase;
-  letter-spacing: .8px;
-  color: #546E7A;
-}
-
-.sh-type-tag {
-  font-size: 9px;
-  font-weight: 800;
-  padding: 2px 6px;
-  border-radius: 5px;
-  text-transform: uppercase;
-  letter-spacing: .5px;
-}
-
-.sh-tag--pheoc    { background: #F3E5F5; color: #6A1B9A; border: 1px solid #CE93D8; }
-.sh-tag--province { background: #E3F2FD; color: #0D47A1; border: 1px solid #BBDEFB; }
-
-.sh-count {
-  font-size: 11px;
-  font-weight: 700;
-  color: #78909C;
-  background: #E8EDF8;
-  padding: 2px 8px;
-  border-radius: 7px;
-}
-
-/* ── POE Card ── */
-.poe-card {
-  display: flex;
-  align-items: center;
-  gap: 0;
-  background: #FFFFFF;
-  border-radius: 16px;
-  border: 1px solid #E3EAF8;
-  margin: 0 12px 8px;
-  overflow: hidden;
-  cursor: pointer;
-  transition: box-shadow .1s, transform .1s;
-  position: relative;
-  box-shadow: 0 1px 4px rgba(13, 28, 80, .05);
-}
-
-.poe-card:active {
-  transform: scale(.985);
-  box-shadow: 0 1px 2px rgba(13, 28, 80, .08);
-}
-
-/* Left mode accent bar */
-.poe-card-accent {
-  width: 4px;
-  align-self: stretch;
-  flex-shrink: 0;
-  border-radius: 0 2px 2px 0;
-}
-
-.accent--land  { background: #2E7D32; }
-.accent--air   { background: #1565C0; }
-.accent--water { background: #0097A7; }
-
-/* Card body */
-.poe-card-body {
-  flex: 1;
-  padding: 11px 10px 11px 12px;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-}
-
-/* Row 1 */
-.pcb-row1 {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-}
-
-.poe-mode-icon {
-  width: 32px;
-  height: 32px;
-  border-radius: 10px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
-
-.poe-mode-icon svg {
-  width: 17px;
-  height: 17px;
-}
-
-.mode-ic--land  { background: #E8F5E9; color: #2E7D32; }
-.mode-ic--air   { background: #E3F2FD; color: #1565C0; }
-.mode-ic--water { background: #E0F7FA; color: #0097A7; }
-
-.poe-name-block {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-}
-
-.poe-name {
-  font-family: 'Syne', sans-serif;
-  font-size: 14.5px;
-  font-weight: 700;
-  color: #0D1B3E;
-  letter-spacing: -.2px;
-  line-height: 1.2;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.poe-type-lbl {
-  font-size: 9.5px;
-  font-weight: 600;
-  color: #78909C;
-  letter-spacing: .1px;
-}
-
-.poe-badges {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 3px;
-  flex-shrink: 0;
-}
-
-.poe-badge {
-  font-size: 8.5px;
-  font-weight: 800;
-  letter-spacing: .5px;
-  padding: 2px 6px;
-  border-radius: 5px;
-  white-space: nowrap;
-  border: 1px solid;
-}
-
-.badge--major    { background: #FFFBEB; color: #B45309; border-color: #FDE68A; }
-.badge--osbp     { background: #ECFDF5; color: #065F46; border-color: #A7F3D0; }
-.badge--national { background: #FDF4FF; color: #7E22CE; border-color: #E9D5FF; }
-
-/* Row 2: Geography */
-.pcb-row2 {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.geo-ic {
-  width: 11px;
-  height: 11px;
-  flex-shrink: 0;
-}
-
-.pcb-district {
-  font-size: 11.5px;
-  font-weight: 600;
-  color: #37474F;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 130px;
-}
-
-.pcb-sep {
-  color: #B0BEC5;
-  font-size: 10px;
-  line-height: 1;
-  flex-shrink: 0;
-}
-
-.pcb-province {
-  font-size: 11px;
-  font-weight: 500;
-  color: #78909C;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  min-width: 0;
-}
-
-/* Row 3: Country + code + border */
-.pcb-row3 {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  flex-wrap: wrap;
-}
-
-.pcb-code {
-  font-size: 10px;
-  font-weight: 800;
-  font-family: 'SF Mono', 'Fira Code', monospace;
-  letter-spacing: .5px;
-  color: #0D47A1;
-  background: #E3F2FD;
-  border: 1px solid #BBDEFB;
-  padding: 1px 6px;
-  border-radius: 5px;
-}
-
-.border-ic {
-  width: 11px;
-  height: 11px;
-  flex-shrink: 0;
-}
-
-.pcb-border {
-  font-size: 10.5px;
-  font-weight: 600;
-  color: #2E7D32;
-}
-
-/* Chevron */
-.poe-card-chevron {
-  padding: 0 12px 0 6px;
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-}
-
-.poe-card-chevron svg {
-  width: 8px;
-  height: 12px;
-}
-
-/* ══════════════════════════════════════════════════════════════════════════
-   DETAIL MODAL
-══════════════════════════════════════════════════════════════════════════ */
-
-.modal-content {
-  --background: #EEF2FF;
-}
-
-.modal-handle {
-  width: 40px;
-  height: 4px;
-  background: #CBD5E0;
-  border-radius: 2px;
-  margin: 10px auto 0;
-}
-
-/* Modal header */
-.modal-hdr {
-  position: relative;
-  overflow: hidden;
-  padding-bottom: 14px;
-}
-
-.modal-hdr--land  { background: linear-gradient(180deg, #1B5E20 0%, #2E7D32 100%); }
-.modal-hdr--air   { background: linear-gradient(180deg, #0D47A1 0%, #1565C0 100%); }
-.modal-hdr--water { background: linear-gradient(180deg, #006064 0%, #0097A7 100%); }
-
-.mh-pattern {
-  position: absolute;
-  inset: 0;
-  background:
-    radial-gradient(ellipse at 85% 20%, rgba(255,255,255,.08), transparent 55%),
-    radial-gradient(ellipse at 10% 80%, rgba(255,255,255,.05), transparent 40%);
-  pointer-events: none;
-}
-
-.mh-top {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  padding: 14px 16px 10px;
-  position: relative;
-  z-index: 2;
-}
-
-.mh-close-btn {
-  width: 34px;
-  height: 34px;
-  border-radius: 50%;
-  background: rgba(255,255,255,.12);
-  border: 1px solid rgba(255,255,255,.18);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  cursor: pointer;
-}
-
-.mh-close-btn svg {
-  width: 14px;
-  height: 14px;
-}
-
-.mh-title-block {
-  flex: 1;
-  min-width: 0;
-}
-
-.mh-eyebrow {
-  display: block;
-  font-size: 9px;
-  font-weight: 700;
-  letter-spacing: 2px;
-  text-transform: uppercase;
-  color: rgba(255,255,255,.55);
-  margin-bottom: 3px;
-}
-
-.mh-title {
-  font-family: 'Syne', sans-serif;
-  font-size: 20px;
-  font-weight: 800;
-  color: #fff;
-  letter-spacing: -.4px;
-  line-height: 1.15;
-  margin: 0;
-}
-
-.mh-readonly-tag {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 2px;
-  background: rgba(255,255,255,.1);
-  border: 1px solid rgba(255,255,255,.16);
-  border-radius: 8px;
-  padding: 4px 8px;
-  flex-shrink: 0;
-}
-
-.mh-readonly-tag svg {
-  width: 12px;
-  height: 12px;
-}
-
-.mh-readonly-tag span {
-  font-size: 8px;
-  font-weight: 700;
-  letter-spacing: .5px;
-  text-transform: uppercase;
-  color: rgba(255,255,255,.6);
-}
-
-/* Badge row */
-.mh-badge-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 0 16px;
-  position: relative;
-  z-index: 2;
-  flex-wrap: wrap;
-}
-
-.mh-type-pill {
-  padding: 4px 12px;
-  border-radius: 20px;
-  font-size: 10.5px;
-  font-weight: 800;
-  letter-spacing: .3px;
-}
-
-.type-pill--land  { background: rgba(255,255,255,.15); color: #fff; border: 1px solid rgba(255,255,255,.25); }
-.type-pill--air   { background: rgba(255,255,255,.15); color: #fff; border: 1px solid rgba(255,255,255,.25); }
-.type-pill--water { background: rgba(255,255,255,.15); color: #fff; border: 1px solid rgba(255,255,255,.25); }
-
-.mh-badge {
-  padding: 3px 10px;
-  border-radius: 8px;
-  font-size: 9.5px;
-  font-weight: 800;
-  letter-spacing: .5px;
-  text-transform: uppercase;
-}
-
-/* Modal body */
-.modal-body {
-  padding: 12px 14px 0;
-}
-
-/* Section headers */
-.modal-section-hdr {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 14px 0 8px;
-}
-
-.msh-num {
-  width: 22px;
-  height: 22px;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 11px;
-  font-weight: 800;
-  color: #fff;
-  flex-shrink: 0;
-}
-
-.msh-blue   { background: #1565C0; }
-.msh-green  { background: #2E7D32; }
-.msh-orange { background: #E65100; }
-.msh-purple { background: #6A1B9A; }
-
-.msh-title {
-  font-family: 'Syne', sans-serif;
-  font-size: 13.5px;
-  font-weight: 700;
-  color: #0D1B3E;
-  letter-spacing: -.1px;
-  flex: 1;
-}
-
-.msh-readonly-note {
-  font-size: 9px;
-  font-weight: 600;
-  color: #78909C;
-  background: #ECEFF1;
-  padding: 2px 7px;
-  border-radius: 6px;
-  white-space: nowrap;
-}
-
-/* Detail card */
-.detail-card {
-  background: #FFFFFF;
-  border: 1px solid #E3EAF8;
-  border-radius: 16px;
-  overflow: hidden;
-}
-
-.dc-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 11px 14px;
-  border-bottom: 1px solid #F1F5FB;
-}
-
-.dc-row:last-child {
-  border-bottom: none;
-}
-
-.dc-ic {
-  width: 30px;
-  height: 30px;
-  border-radius: 9px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
-
-.dc-ic svg { width: 14px; height: 14px; }
-
-.dc-ic--blue   { background: #E3F2FD; }
-.dc-ic--purple { background: #F3E5F5; }
-.dc-ic--orange { background: #FBE9E7; }
-.dc-ic--green  { background: #E8F5E9; }
-.dc-ic--teal   { background: #E0F7FA; }
-.dc-ic--grey   { background: #ECEFF1; }
-.dc-ic--land   { background: #E8F5E9; }
-.dc-ic--air    { background: #E3F2FD; }
-.dc-ic--water  { background: #E0F7FA; }
-
-.dc-body {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.dc-lbl {
-  font-size: 9px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: .6px;
-  color: #90A4AE;
-  display: block;
-}
-
-.dc-val {
-  font-size: 13.5px;
-  font-weight: 600;
-  color: #0D1B3E;
-  line-height: 1.2;
-}
-
-.dc-val--green { color: #2E7D32; }
-.dc-val--blue  { color: #0D47A1; }
-.dc-val--mono  { font-family: 'SF Mono', 'Fira Code', monospace; font-size: 12px; letter-spacing: .3px; }
-.dc-val--link  { color: #1565C0; font-size: 10.5px; word-break: break-all; }
-
-.dc-right { flex-shrink: 0; }
-
-.dc-badge {
-  padding: 3px 8px;
-  border-radius: 6px;
-  font-size: 9px;
-  font-weight: 800;
-  letter-spacing: .5px;
-  text-transform: uppercase;
-}
-
-.dc-badge--pheoc { background: #F3E5F5; color: #6A1B9A; border: 1px solid #CE93D8; }
-
-/* ── Flags grid ── */
-.flags-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 8px;
-}
-
-.flag-cell {
-  border-radius: 14px;
-  border: 1.5px solid;
-  padding: 12px 8px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 6px;
-  text-align: center;
-}
-
-.flag-ic {
-  width: 28px;
-  height: 28px;
-  border-radius: 9px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.flag-ic svg { width: 14px; height: 14px; }
-
-.flag-lbl {
-  font-size: 9px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: .5px;
-  line-height: 1.2;
-}
-
-.flag-status {
-  font-family: 'Syne', sans-serif;
-  font-size: 13px;
-  font-weight: 800;
-}
-
-/* OFF state */
-.flag-cell--off {
-  background: #FAFAFA;
-  border-color: #ECEFF1;
-}
-
-.flag-cell--off .flag-ic { background: #ECEFF1; }
-.flag-cell--off .flag-ic svg { stroke: #B0BEC5; }
-.flag-cell--off .flag-lbl { color: #B0BEC5; }
-.flag-cell--off .flag-status { color: #CFD8DC; }
-
-/* MAJOR ON */
-.flag-cell--major {
-  background: linear-gradient(145deg, #FFFBEB, #FEF3C7);
-  border-color: #FDE68A;
-}
-
-.flag-cell--major .flag-ic { background: #F59E0B; }
-.flag-cell--major .flag-ic svg { stroke: #fff; }
-.flag-cell--major .flag-lbl { color: #92400E; }
-.flag-cell--major .flag-status { color: #B45309; }
-
-/* OSBP ON */
-.flag-cell--osbp {
-  background: linear-gradient(145deg, #ECFDF5, #D1FAE5);
-  border-color: #A7F3D0;
-}
-
-.flag-cell--osbp .flag-ic { background: #10B981; }
-.flag-cell--osbp .flag-ic svg { stroke: #fff; }
-.flag-cell--osbp .flag-lbl { color: #065F46; }
-.flag-cell--osbp .flag-status { color: #047857; }
-
-/* NATIONAL ON */
-.flag-cell--national {
-  background: linear-gradient(145deg, #FDF4FF, #F3E8FF);
-  border-color: #E9D5FF;
-}
-
-.flag-cell--national .flag-ic { background: #7C3AED; }
-.flag-cell--national .flag-ic svg { stroke: #fff; }
-.flag-cell--national .flag-lbl { color: #4C1D95; }
-.flag-cell--national .flag-status { color: #5B21B6; }
-
-/* ── Critical details panel ── */
-.critical-panel {
-  background: #E3F2FD;
-  border: 1px solid #BBDEFB;
-  border-radius: 14px;
-  padding: 11px 13px;
-  margin-top: 8px;
-}
-
-.cp-header {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-bottom: 7px;
-}
-
-.cp-header svg {
-  width: 14px;
-  height: 14px;
-  flex-shrink: 0;
-}
-
-.cp-hdr-txt {
-  font-size: 9.5px;
-  font-weight: 800;
-  text-transform: uppercase;
-  letter-spacing: .8px;
-  color: #0D47A1;
-}
-
-.cp-body {
-  font-size: 12.5px;
-  font-weight: 500;
-  color: #1565C0;
-  line-height: 1.5;
-}
-
-/* ── IHR notice ── */
-.ihr-notice {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  background: #F0F4FF;
-  border: 1px solid #C7D7F5;
-  border-radius: 14px;
-  padding: 12px 13px;
-  margin-top: 12px;
-}
-
-.ihr-notice-icon {
-  width: 34px;
-  height: 34px;
-  border-radius: 10px;
-  background: #E3F2FD;
-  border: 1px solid #BBDEFB;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
-
-.ihr-notice-icon svg {
-  width: 16px;
-  height: 16px;
-}
-
-.ihr-notice-body {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.ihr-notice-title {
-  font-size: 11px;
-  font-weight: 800;
-  color: #0D47A1;
-}
-
-.ihr-notice-sub {
-  font-size: 10.5px;
-  font-weight: 400;
-  color: #546E7A;
-  line-height: 1.5;
-}
-
-/* ══════════════════════════════════════════════════════════════════════════
-   DEEP OVERRIDES — Ionic 8 internal parts
-══════════════════════════════════════════════════════════════════════════ */
-
-/* IonRefresher */
-ion-refresher {
-  --background: #EEF2FF;
-  --color: #1565C0;
-}
-
-/* Modal sheet styling */
-:global(.poe-detail-modal .modal-wrapper) {
-  border-radius: 24px 24px 0 0 !important;
-  overflow: hidden;
-}
-
-/* Ensure IonHeader background matches on iOS safe-area */
-ion-header.poe-hdr {
-  background: linear-gradient(180deg, #0D47A1 0%, #1565C0 100%);
-}
+/* ═══════════════════════════════════════════════════════════════════════
+   SENTINEL DUAL-TONE — POE MANAGEMENT
+   DARK ZONE  : header · stats · tabs · search (navy gradients)
+   LIGHT ZONE : content · cards · modals (luminous gradients)
+═══════════════════════════════════════════════════════════════════════ */
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=Syne:wght@600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+/* ── Keyframes ──────────────────────────────────────────────────────── */
+@keyframes slideUp   { from{opacity:0;transform:translateY(12px)} to{opacity:1;transform:translateY(0)} }
+@keyframes stream    { 0%{transform:translateX(-100%)} 100%{transform:translateX(350%)} }
+@keyframes scan      { 0%{left:-60%} 100%{left:150%} }
+@keyframes pulse-green { 0%,100%{box-shadow:0 0 6px rgba(0,168,107,.4)} 50%{box-shadow:0 0 16px rgba(0,168,107,.8)} }
+@keyframes pulse-blue  { 0%,100%{box-shadow:0 0 6px rgba(0,112,224,.4)} 50%{box-shadow:0 0 16px rgba(0,112,224,.8)} }
+@keyframes pulse-teal  { 0%,100%{box-shadow:0 0 6px rgba(0,143,122,.4)} 50%{box-shadow:0 0 16px rgba(0,143,122,.8)} }
+@keyframes dotBlink  { 0%,100%{opacity:.5} 50%{opacity:1} }
+@keyframes chainFlow { 0%{opacity:.4;transform:scaleX(.8)} 100%{opacity:1;transform:scaleX(1)} }
+@media (prefers-reduced-motion: reduce){ *,*::before,*::after{ animation-duration:.01ms!important; transition-duration:.01ms!important } }
+
+/* ═══════════════════════════════════════════════════════════════════
+   DARK ZONE — Header
+═══════════════════════════════════════════════════════════════════ */
+.ph-header  { --background: #070E1B; }
+.ph-toolbar { --background: linear-gradient(180deg, #070E1B 0%, #0E1A2E 100%); --color: #EDF2FA; --border-width: 0; }
+
+.ph-title-block  { display:flex; flex-direction:column; gap:1px; }
+.ph-eyebrow      { font-size:7px; font-weight:700; color:#7E92AB; letter-spacing:1.2px; text-transform:uppercase; font-family:'DM Sans',sans-serif; }
+.ph-title        { font-size:18px; font-weight:800; color:#EDF2FA; font-family:'Syne',sans-serif; line-height:1.1; }
+
+.ph-network-badge { display:flex; flex-direction:column; align-items:center; padding:6px 10px; background:rgba(0,180,255,.08); border-radius:10px; border:1px solid rgba(0,180,255,.15); margin-right:4px; gap:1px; }
+.ph-network-dot  { width:6px; height:6px; border-radius:50%; background:#00E676; animation:pulse-green 2s infinite; margin-bottom:2px; }
+.ph-network-n    { font-size:15px; font-weight:900; color:#00B4FF; font-family:'Syne',sans-serif; line-height:1; }
+.ph-network-l    { font-size:7px; font-weight:700; color:#7E92AB; letter-spacing:.8px; text-transform:uppercase; }
+
+/* Stats ribbon */
+.ph-stats-ribbon { display:flex; align-items:center; background:linear-gradient(180deg, #0E1A2E 0%, #142640 100%); padding:9px 12px; border-bottom:1px solid rgba(255,255,255,.05); position:relative; overflow:hidden; }
+.ph-stats-texture { position:absolute; inset:0; pointer-events:none; background-image:linear-gradient(rgba(0,180,255,.03) 1px,transparent 1px),linear-gradient(90deg,rgba(0,180,255,.03) 1px,transparent 1px); background-size:28px 28px; mask-image:linear-gradient(180deg,black 50%,transparent 100%); }
+.ph-stat         { display:flex; flex-direction:column; align-items:center; flex:1; position:relative; z-index:1; }
+.ph-stat-n       { font-size:17px; font-weight:900; color:#EDF2FA; font-family:'Syne',sans-serif; line-height:1; }
+.ph-stat-l       { font-size:8px; font-weight:700; color:#7E92AB; letter-spacing:.6px; text-transform:uppercase; margin-top:1px; }
+.ph-stat-n--green  { color:#00E676; text-shadow:0 0 12px rgba(0,230,118,.3); }
+.ph-stat-n--blue   { color:#00B4FF; text-shadow:0 0 12px rgba(0,180,255,.3); }
+.ph-stat-n--teal   { color:#00E5FF; text-shadow:0 0 12px rgba(0,229,255,.3); }
+.ph-stat-n--amber  { color:#FFB300; text-shadow:0 0 12px rgba(255,179,0,.3); }
+.ph-stat-n--purple { color:#B388FF; text-shadow:0 0 12px rgba(179,136,255,.3); }
+.ph-stat-sep     { width:1px; height:28px; background:rgba(255,255,255,.06); margin:0 2px; }
+
+/* Search */
+.ph-search-zone { padding:10px 12px 6px; background:linear-gradient(180deg, #142640, #0E1A2E); }
+.ph-search-bar  { display:flex; align-items:center; gap:8px; background:rgba(255,255,255,.07); border:1px solid rgba(255,255,255,.1); border-radius:12px; padding:0 12px; position:relative; overflow:hidden; transition:all .2s; }
+.ph-search-bar--active { border-color:rgba(0,180,255,.35); background:rgba(0,180,255,.06); }
+.ph-search-bar::after { content:''; position:absolute; top:0; left:-60%; width:50%; height:100%; background:linear-gradient(90deg,transparent,rgba(0,180,255,.04),transparent); animation:scan 6s ease-in-out infinite; pointer-events:none; }
+.ph-search-ic    { width:16px; height:16px; flex-shrink:0; }
+.ph-search-input { flex:1; background:transparent; border:none; color:#EDF2FA; font-size:16px; padding:11px 0; outline:none; font-family:'DM Sans',sans-serif; }
+.ph-search-input::placeholder { color:rgba(255,255,255,.3); }
+.ph-search-clear { background:none; border:none; color:rgba(255,255,255,.4); cursor:pointer; font-size:13px; padding:4px 2px; min-width:28px; min-height:28px; display:flex; align-items:center; justify-content:center; }
+
+/* Filter chip rows */
+.ph-chip-row { display:flex; gap:6px; overflow-x:auto; scrollbar-width:none; padding:6px 12px 4px; background:linear-gradient(180deg, #0E1A2E, #0A1628); }
+.ph-chip-row--flags { padding-bottom:8px; border-bottom:1px solid rgba(255,255,255,.06); }
+.ph-chip-row::-webkit-scrollbar { display:none; }
+.ph-chip { display:flex; align-items:center; gap:5px; padding:7px 12px; border-radius:20px; font-size:10px; font-weight:700; cursor:pointer; border:1px solid transparent; white-space:nowrap; background:rgba(255,255,255,.07); color:#7E92AB; transition:all .18s; min-height:36px; font-family:'DM Sans',sans-serif; }
+.ph-chip em { font-style:normal; background:rgba(255,255,255,.08); border-radius:8px; padding:0 5px; font-size:8px; font-weight:900; font-family:'JetBrains Mono',monospace; }
+.ph-chip-ic { width:13px; height:13px; flex-shrink:0; }
+.ph-chip--active { color:#EDF2FA; border-color:rgba(255,255,255,.15); background:rgba(255,255,255,.12); }
+.ph-chip--land.ph-chip--active  { color:#00E676; border-color:rgba(0,230,118,.3); background:rgba(0,230,118,.08); }
+.ph-chip--air.ph-chip--active   { color:#00B4FF; border-color:rgba(0,180,255,.3); background:rgba(0,180,255,.08); }
+.ph-chip--water.ph-chip--active { color:#00E5FF; border-color:rgba(0,229,255,.3); background:rgba(0,229,255,.08); }
+
+/* ═══════════════════════════════════════════════════════════════════
+   LIGHT ZONE — Content
+═══════════════════════════════════════════════════════════════════ */
+
+/* Results bar */
+.ph-results-bar { display:flex; align-items:center; justify-content:space-between; padding:10px 14px 4px; }
+.ph-results-text { font-size:10px; font-weight:600; color:#94A3B8; }
+.ph-results-clear { font-size:10px; font-weight:700; color:#0070E0; background:none; border:none; cursor:pointer; padding:4px 8px; border-radius:5px; background:rgba(0,112,224,.08); }
+
+/* Group header */
+.ph-group-hdr { display:flex; align-items:center; gap:8px; padding:14px 14px 4px; }
+.ph-group-dot  { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
+.ph-group-dot--pheoc    { background:#7B40D8; box-shadow:0 0 6px rgba(123,64,216,.5); }
+.ph-group-dot--province { background:#0070E0; box-shadow:0 0 6px rgba(0,112,224,.5); }
+.ph-group-name { font-size:11px; font-weight:700; color:#0B1A30; flex:1; min-width:0; font-family:'DM Sans',sans-serif; }
+.ph-group-tag  { font-size:8px; font-weight:700; padding:2px 6px; border-radius:4px; font-family:'JetBrains Mono',monospace; flex-shrink:0; }
+.ph-group-tag--pheoc    { background:linear-gradient(135deg,#F5F3FF,#EDE9FE); color:#7B40D8; border:1px solid rgba(123,64,216,.15); }
+.ph-group-tag--province { background:linear-gradient(135deg,#E0ECFF,#CCE0FF); color:#0070E0; border:1px solid rgba(0,112,224,.15); }
+.ph-group-count { font-size:10px; font-weight:800; color:#94A3B8; font-family:'JetBrains Mono',monospace; min-width:20px; text-align:center; }
+
+/* POE card */
+.ph-list { padding:0 10px 0; }
+.ph-card {
+  display:flex; align-items:stretch;
+  background:linear-gradient(145deg, #FFFFFF 0%, #F4F7FC 100%);
+  border:1.5px solid rgba(0,0,0,.06); border-radius:14px;
+  box-shadow:0 1px 3px rgba(0,0,0,.04), 0 4px 20px rgba(0,30,80,.06);
+  margin-bottom:8px; overflow:hidden; cursor:pointer; position:relative;
+  animation:slideUp .4s cubic-bezier(.16,1,.3,1) both;
+  transition:transform .22s cubic-bezier(.16,1,.3,1), box-shadow .22s;
+}
+.ph-card::before { content:''; position:absolute; top:0; left:0; right:0; height:1px; background:linear-gradient(90deg,transparent 15%,rgba(255,255,255,.9) 50%,transparent 85%); z-index:2; pointer-events:none; }
+.ph-card:hover  { transform:translateY(-1px); box-shadow:0 3px 10px rgba(0,0,0,.07), 0 10px 35px rgba(0,30,80,.11); }
+.ph-card:active { transform:scale(.985); }
+
+/* Data stream on card */
+.ph-card-stream { position:absolute; top:0; bottom:0; width:45%; left:0; background:linear-gradient(90deg,transparent,rgba(0,112,224,.025),transparent); animation:stream 8s ease-in-out infinite; pointer-events:none; z-index:1; }
+
+/* Left accent bar per mode */
+.ph-card-bar { width:4px; flex-shrink:0; }
+.ph-card-bar--land  { background:#00A86B; box-shadow:0 0 8px rgba(0,168,107,.35); animation:pulse-green 2.5s infinite; }
+.ph-card-bar--air   { background:#0070E0; box-shadow:0 0 8px rgba(0,112,224,.3);  animation:pulse-blue 2.5s infinite; }
+.ph-card-bar--water { background:#008F7A; box-shadow:0 0 8px rgba(0,143,122,.3);  animation:pulse-teal 2.5s infinite; }
+
+.ph-card-body { flex:1; padding:11px 12px; position:relative; z-index:2; }
+.ph-card-r1 { display:flex; align-items:center; gap:10px; margin-bottom:6px; }
+.ph-card-r2 { display:flex; align-items:center; gap:5px; margin-bottom:4px; font-size:11px; color:#475569; }
+.ph-card-r3 { display:flex; align-items:center; gap:6px; }
+
+/* Mode icon */
+.ph-mode-icon { width:34px; height:34px; border-radius:9px; flex-shrink:0; display:flex; align-items:center; justify-content:center; border:1px solid; }
+.ph-mode-icon svg { width:18px; height:18px; }
+.ph-mode-icon--land  { background:linear-gradient(135deg,#ECFDF5,#D1FAE5); border-color:rgba(0,168,107,.2); color:#00A86B; }
+.ph-mode-icon--air   { background:linear-gradient(135deg,#E0ECFF,#CCE0FF); border-color:rgba(0,112,224,.2); color:#0070E0; }
+.ph-mode-icon--water { background:linear-gradient(135deg,#E0F7F4,#CCF0EA); border-color:rgba(0,143,122,.2); color:#008F7A; }
+
+.ph-name-block { flex:1; min-width:0; }
+.ph-name  { display:block; font-size:14px; font-weight:700; color:#0B1A30; font-family:'DM Sans',sans-serif; line-height:1.25; }
+.ph-type  { display:block; font-size:9px; font-weight:600; color:#94A3B8; margin-top:1px; }
+.ph-geo-pin { font-size:10px; }
+.ph-district { font-size:11px; font-weight:600; color:#475569; }
+.ph-province { font-size:11px; color:#94A3B8; }
+.ph-sep      { color:#94A3B8; font-size:10px; }
+
+.ph-card-badges { display:flex; gap:4px; flex-shrink:0; }
+.ph-badge { font-size:7px; font-weight:800; padding:2px 5px; border-radius:4px; font-family:'JetBrains Mono',monospace; letter-spacing:.3px; }
+.ph-badge--major    { background:linear-gradient(135deg,#FEF2F2,#FECACA); color:#E02050; border:1px solid rgba(224,32,80,.15); }
+.ph-badge--osbp     { background:linear-gradient(135deg,#FFFBEB,#FEF3C7); color:#CC8800; border:1px solid rgba(204,136,0,.15); }
+.ph-badge--national { background:linear-gradient(135deg,#F5F3FF,#EDE9FE); color:#7B40D8; border:1px solid rgba(123,64,216,.15); }
+
+.ph-code        { font-size:9px; font-family:'JetBrains Mono',monospace; color:#0070E0; background:linear-gradient(135deg,#E0ECFF,#CCE0FF); padding:2px 6px; border-radius:4px; }
+.ph-border      { font-size:10px; color:#00A86B; font-weight:600; }
+.ph-has-notes   { font-size:9px; color:#94A3B8; }
+.ph-card-chevron { display:flex; align-items:center; padding:0 14px 0 6px; color:#94A3B8; font-size:22px; font-weight:200; transition:color .15s, transform .15s; position:relative; z-index:2; }
+.ph-card:hover .ph-card-chevron { color:#0070E0; transform:translateX(3px); }
+
+/* Empty state */
+.ph-empty { display:flex; flex-direction:column; align-items:center; padding:80px 24px; gap:12px; }
+.ph-empty-icon  { font-size:48px; opacity:.35; }
+.ph-empty-title { font-size:17px; font-weight:700; color:#475569; font-family:'DM Sans',sans-serif; }
+.ph-empty-body  { font-size:12px; color:#94A3B8; text-align:center; line-height:1.5; }
+.ph-empty-clear { padding:10px 20px; border-radius:10px; background:linear-gradient(135deg,#0055CC,#0070E0); color:#fff; border:none; cursor:pointer; font-size:12px; font-weight:700; box-shadow:0 4px 14px rgba(0,112,224,.3); font-family:'DM Sans',sans-serif; min-height:44px; }
+
+/* ═══════════════════════════════════════════════════════════════════
+   DETAIL MODAL — Dark header + Light content
+═══════════════════════════════════════════════════════════════════ */
+.pd-header { }
+.pd-toolbar-title { display:flex; flex-direction:column; gap:2px; }
+.pd-toolbar-eyebrow { font-size:7px; font-weight:700; color:#7E92AB; letter-spacing:1px; text-transform:uppercase; }
+.pd-toolbar-name    { font-size:15px; font-weight:800; color:#EDF2FA; font-family:'Syne',sans-serif; line-height:1.2; }
+.pd-readonly-tag    { font-size:8px; font-weight:700; color:#7E92AB; background:rgba(255,255,255,.07); border:1px solid rgba(255,255,255,.1); border-radius:5px; padding:3px 8px; margin-right:6px; font-family:'JetBrains Mono',monospace; }
+
+/* ── CINEMATIC HERO ──────────────────────────────────────────────── */
+.pd-hero {
+  position:relative; overflow:hidden;
+  padding:20px 16px 16px;
+}
+.pd-hero--land  { background:linear-gradient(160deg, #011B0A 0%, #042E14 50%, #073D1A 100%); }
+.pd-hero--air   { background:linear-gradient(160deg, #010D1E 0%, #031526 50%, #061E38 100%); }
+.pd-hero--water { background:linear-gradient(160deg, #011517 0%, #032028 50%, #062E36 100%); }
+
+.pd-hero-texture { position:absolute; inset:0; pointer-events:none; background-image:linear-gradient(rgba(255,255,255,.025) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.025) 1px,transparent 1px); background-size:24px 24px; mask-image:linear-gradient(180deg,black 40%,transparent 100%); }
+.pd-hero-orb    { position:absolute; top:-80px; right:-80px; width:260px; height:260px; border-radius:50%; filter:blur(80px); opacity:.18; pointer-events:none; }
+.pd-hero--land  .pd-hero-orb { background:#00E676; }
+.pd-hero--air   .pd-hero-orb { background:#00B4FF; }
+.pd-hero--water .pd-hero-orb { background:#00E5FF; }
+
+/* Large background icon */
+.pd-hero-mode-icon { position:absolute; right:-20px; top:0; opacity:.07; pointer-events:none; }
+.pd-hero-mode-icon svg { width:160px; height:160px; }
+.pd-hero--land  .pd-hero-mode-icon { color:#00E676; }
+.pd-hero--air   .pd-hero-mode-icon { color:#00B4FF; }
+.pd-hero--water .pd-hero-mode-icon { color:#00E5FF; }
+
+.pd-hero-content { position:relative; z-index:2; }
+.pd-hero-top     { display:flex; align-items:center; gap:8px; margin-bottom:12px; }
+
+.pd-hero-mode-badge  { font-size:9px; font-weight:800; padding:4px 10px; border-radius:6px; font-family:'JetBrains Mono',monospace; letter-spacing:.6px; }
+.pd-mode-badge--land  { background:rgba(0,230,118,.15); color:#00E676; border:1px solid rgba(0,230,118,.25); }
+.pd-mode-badge--air   { background:rgba(0,180,255,.12); color:#00B4FF; border:1px solid rgba(0,180,255,.22); }
+.pd-mode-badge--water { background:rgba(0,229,255,.1);  color:#00E5FF; border:1px solid rgba(0,229,255,.2); }
+
+.pd-hero-national-badge { font-size:9px; font-weight:800; padding:4px 10px; border-radius:6px; background:rgba(179,136,255,.15); color:#B388FF; border:1px solid rgba(179,136,255,.25); }
+
+.pd-hero-name { font-size:28px; font-weight:900; color:#EDF2FA; font-family:'Syne',sans-serif; line-height:1.1; margin:0 0 5px; letter-spacing:-.5px; }
+.pd-hero-type { font-size:11px; font-weight:600; color:#7E92AB; margin-bottom:13px; text-transform:uppercase; letter-spacing:.5px; }
+
+.pd-hero-flags { display:flex; flex-wrap:wrap; gap:6px; }
+.pd-hero-flag  { display:flex; align-items:center; gap:5px; font-size:10px; font-weight:700; padding:5px 10px; border-radius:7px; border:1px solid; font-family:'DM Sans',sans-serif; }
+.pd-hero-flag span { font-size:12px; }
+.pd-hero-flag--major  { background:rgba(224,32,80,.12);  color:#FF6B8A; border-color:rgba(224,32,80,.22); }
+.pd-hero-flag--osbp   { background:rgba(255,179,0,.1);   color:#FFD54F; border-color:rgba(255,179,0,.22); }
+.pd-hero-flag--border { background:rgba(255,255,255,.07); color:#7E92AB; border-color:rgba(255,255,255,.1); }
+
+/* POE code badge */
+.pd-hero-code-badge { position:absolute; top:16px; right:14px; z-index:3; display:flex; flex-direction:column; align-items:center; background:rgba(255,255,255,.08); border:1px solid rgba(255,255,255,.1); border-radius:10px; padding:6px 10px; backdrop-filter:blur(8px); }
+.pd-hero-code-label { font-size:7px; font-weight:700; color:#7E92AB; letter-spacing:1px; text-transform:uppercase; margin-bottom:2px; }
+.pd-hero-code       { font-size:11px; font-weight:700; color:#EDF2FA; font-family:'JetBrains Mono',monospace; }
+
+/* ── MODAL BODY — LIGHT ZONE ─────────────────────────────────────── */
+.pd-body { padding:16px 14px 0; }
+
+/* Section labels */
+.pd-section      { margin-bottom:22px; }
+.pd-section-label {
+  display:flex; align-items:center; gap:8px;
+  font-size:9px; font-weight:700; color:#0070E0;
+  letter-spacing:1.1px; text-transform:uppercase;
+  margin-bottom:12px; padding-bottom:8px;
+  border-bottom:1px solid rgba(0,112,224,.12);
+  font-family:'DM Sans',sans-serif;
+}
+.pd-section-glyph {
+  width:24px; height:24px; border-radius:6px; flex-shrink:0;
+  background:linear-gradient(135deg,#E0ECFF,#CCE0FF);
+  border:1px solid rgba(0,112,224,.15);
+  display:flex; align-items:center; justify-content:center; font-size:13px;
+}
+
+/* ── HIERARCHY TREE ────────────────────────────────────────────── */
+.pd-hierarchy-tree { display:flex; flex-direction:column; margin-bottom:10px; }
+.pd-tree-node {
+  display:flex; align-items:flex-start; gap:10px; padding:11px 13px;
+  background:linear-gradient(145deg,#FFFFFF,#F4F7FC);
+  border:1.5px solid rgba(0,0,0,.06); border-radius:12px;
+  position:relative; overflow:hidden;
+  animation:slideUp .35s cubic-bezier(.16,1,.3,1) both;
+}
+.pd-tree-node::before { content:''; position:absolute; top:0; left:0; right:0; height:1px; background:linear-gradient(90deg,transparent 20%,rgba(255,255,255,.85) 50%,transparent 80%); }
+.pd-tree-node--country  { border-color:rgba(0,0,0,.06); }
+.pd-tree-node--pheoc    { border-color:rgba(123,64,216,.15); }
+.pd-tree-node--district { border-color:rgba(204,136,0,.12); }
+.pd-tree-node--land   { border-color:rgba(0,168,107,.2); }
+.pd-tree-node--air    { border-color:rgba(0,112,224,.2); }
+.pd-tree-node--water  { border-color:rgba(0,143,122,.2); }
+
+.pd-tree-node-icon { width:34px; height:34px; border-radius:9px; flex-shrink:0; display:flex; align-items:center; justify-content:center; font-size:16px; }
+.pd-tree-node-icon svg { width:16px; height:16px; }
+.pd-tree-icon--country  { background:linear-gradient(135deg,#E0ECFF,#CCE0FF); border:1px solid rgba(0,112,224,.15); }
+.pd-tree-icon--pheoc    { background:linear-gradient(135deg,#F5F3FF,#EDE9FE); border:1px solid rgba(123,64,216,.15); }
+.pd-tree-icon--district { background:linear-gradient(135deg,#FFFBEB,#FEF3C7); border:1px solid rgba(204,136,0,.15); }
+.pd-tree-icon--land     { background:linear-gradient(135deg,#ECFDF5,#D1FAE5); border:1px solid rgba(0,168,107,.15); color:#00A86B; }
+.pd-tree-icon--air      { background:linear-gradient(135deg,#E0ECFF,#CCE0FF); border:1px solid rgba(0,112,224,.15); color:#0070E0; }
+.pd-tree-icon--water    { background:linear-gradient(135deg,#E0F7F4,#CCF0EA); border:1px solid rgba(0,143,122,.15); color:#008F7A; }
+
+.pd-tree-node-key { font-size:8px; font-weight:700; color:#94A3B8; letter-spacing:.8px; text-transform:uppercase; margin-bottom:3px; font-family:'DM Sans',sans-serif; }
+.pd-tree-node-val { font-size:13px; font-weight:700; color:#0B1A30; font-family:'DM Sans',sans-serif; }
+.pd-tree-node-val--poe { font-size:14px; font-weight:800; font-family:'Syne',sans-serif; }
+.pd-tree-node-sub { font-size:9px; color:#94A3B8; margin-top:2px; font-family:'JetBrains Mono',monospace; }
+.pd-tree-node-tag { font-size:7px; font-weight:800; color:#7B40D8; background:rgba(123,64,216,.1); padding:1px 6px; border-radius:3px; margin-top:3px; display:inline-flex; }
+.pd-tree-terminal-dot { width:8px; height:8px; border-radius:50%; background:#00A86B; box-shadow:0 0 8px rgba(0,168,107,.5); margin-left:auto; flex-shrink:0; align-self:center; animation:pulse-green 2s infinite; }
+
+.pd-tree-connector { width:1px; height:10px; background:linear-gradient(180deg,rgba(0,112,224,.2),rgba(0,112,224,.08)); margin:0 auto; margin-left:30px; }
+
+/* Border country */
+.pd-border-card {
+  display:flex; align-items:center; gap:12px; padding:12px 14px;
+  background:linear-gradient(135deg,#ECFDF5,#D1FAE5);
+  border:1.5px solid rgba(0,168,107,.2); border-radius:12px;
+  position:relative; overflow:hidden;
+}
+.pd-border-card-shine { position:absolute; top:0; left:0; right:0; height:1px; background:linear-gradient(90deg,transparent 20%,rgba(255,255,255,.8) 50%,transparent 80%); }
+.pd-border-icon { font-size:22px; color:#00A86B; font-weight:300; line-height:1; }
+.pd-border-body { flex:1; }
+.pd-border-key  { font-size:8px; font-weight:700; color:rgba(0,168,107,.6); letter-spacing:.8px; text-transform:uppercase; margin-bottom:3px; }
+.pd-border-val  { font-size:15px; font-weight:800; color:#007A50; font-family:'Syne',sans-serif; }
+
+/* ── IHR CLASSIFICATION FLAGS ────────────────────────────────────── */
+.pd-flags-grid { display:flex; flex-direction:column; gap:8px; }
+.pd-flag-card  {
+  border-radius:14px; padding:14px; position:relative; overflow:hidden;
+  border:1.5px solid; animation:slideUp .4s cubic-bezier(.16,1,.3,1) both;
+}
+.pd-flag-card-shine { position:absolute; top:0; left:0; right:0; height:1px; background:linear-gradient(90deg,transparent 20%,rgba(255,255,255,.7) 50%,transparent 80%); }
+.pd-flag-card--off    { background:linear-gradient(145deg,#FFFFFF,#F4F7FC); border-color:rgba(0,0,0,.06); }
+.pd-flag-card--major  { background:linear-gradient(135deg,#FEF2F2,#FECACA); border-color:rgba(224,32,80,.2); }
+.pd-flag-card--osbp   { background:linear-gradient(135deg,#FFFBEB,#FEF3C7); border-color:rgba(204,136,0,.2); }
+.pd-flag-card--national { background:linear-gradient(135deg,#F5F3FF,#EDE9FE); border-color:rgba(123,64,216,.2); }
+.pd-flag-icon   { font-size:22px; margin-bottom:8px; line-height:1; }
+.pd-flag-label  { font-size:11px; font-weight:700; color:#0B1A30; margin-bottom:4px; font-family:'DM Sans',sans-serif; }
+.pd-flag-card--off .pd-flag-label { color:#94A3B8; }
+.pd-flag-status { font-size:9px; font-weight:900; letter-spacing:1px; margin-bottom:6px; font-family:'JetBrains Mono',monospace; }
+.pd-flag-card--off .pd-flag-status     { color:#94A3B8; }
+.pd-flag-card--major .pd-flag-status   { color:#E02050; }
+.pd-flag-card--osbp .pd-flag-status    { color:#CC8800; }
+.pd-flag-card--national .pd-flag-status { color:#7B40D8; }
+.pd-flag-desc   { font-size:10px; color:#475569; line-height:1.5; }
+.pd-flag-card--off .pd-flag-desc { color:#94A3B8; }
+
+/* ── NETWORK CARD ────────────────────────────────────────────────── */
+.pd-network-card {
+  background:linear-gradient(145deg,#FFFFFF,#F4F7FC);
+  border:1.5px solid rgba(0,0,0,.06); border-radius:14px;
+  box-shadow:0 1px 3px rgba(0,0,0,.04), 0 4px 20px rgba(0,30,80,.06);
+  overflow:hidden; position:relative;
+}
+.pd-network-card-shine { position:absolute; top:0; left:0; right:0; height:1px; background:linear-gradient(90deg,transparent 20%,rgba(255,255,255,.9) 50%,transparent 80%); }
+.pd-network-stats { display:flex; align-items:center; padding:14px; border-bottom:1px solid rgba(0,0,0,.06); }
+.pd-net-stat     { display:flex; flex-direction:column; align-items:center; flex:1; }
+.pd-net-stat-n   { font-size:20px; font-weight:900; color:#0B1A30; font-family:'Syne',sans-serif; line-height:1; }
+.pd-net-stat-l   { font-size:8px; font-weight:700; color:#94A3B8; letter-spacing:.5px; text-transform:uppercase; margin-top:2px; }
+.pd-net-mode--land  { color:#00A86B; }
+.pd-net-mode--air   { color:#0070E0; }
+.pd-net-mode--water { color:#008F7A; }
+.pd-net-stat-sep { width:1px; height:28px; background:rgba(0,0,0,.06); margin:0 4px; }
+
+/* Reporting chain */
+.pd-chain { padding:12px 14px; }
+.pd-chain-label { font-size:8px; font-weight:700; color:#94A3B8; letter-spacing:1px; text-transform:uppercase; margin-bottom:10px; }
+.pd-chain-nodes { display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+.pd-chain-node  { display:flex; align-items:center; gap:5px; font-size:10px; font-weight:600; color:#475569; }
+.pd-chain-dot   { width:8px; height:8px; border-radius:50%; background:rgba(0,0,0,.12); flex-shrink:0; }
+.pd-chain-dot--active { background:#00A86B; animation:pulse-green 2s infinite; }
+.pd-chain-arrow { font-size:12px; color:#94A3B8; }
+.pd-chain-node--poe { color:#0B1A30; font-weight:800; }
+
+/* ── SIBLING POEs ─────────────────────────────────────────────────── */
+.pd-siblings { display:flex; flex-direction:column; gap:7px; }
+.pd-sibling-card {
+  display:flex; align-items:center; gap:0;
+  background:linear-gradient(145deg,#FFFFFF,#F4F7FC);
+  border:1.5px solid rgba(0,0,0,.06); border-radius:12px;
+  overflow:hidden; cursor:pointer;
+  transition:all .18s; animation:slideUp .35s cubic-bezier(.16,1,.3,1) both;
+}
+.pd-sibling-card:hover { box-shadow:0 2px 8px rgba(0,30,80,.1); transform:translateX(3px); }
+.pd-sibling-bar  { width:4px; flex-shrink:0; }
+.pd-sib-bar--land  { background:#00A86B; }
+.pd-sib-bar--air   { background:#0070E0; }
+.pd-sib-bar--water { background:#008F7A; }
+.pd-sibling-body { flex:1; padding:9px 12px; }
+.pd-sibling-name { font-size:12px; font-weight:700; color:#0B1A30; font-family:'DM Sans',sans-serif; margin-bottom:2px; }
+.pd-sibling-meta { font-size:9px; color:#94A3B8; }
+.pd-sibling-badges { display:flex; gap:3px; padding-right:10px; }
+.pd-sib-badge { font-size:7px; font-weight:800; width:18px; height:18px; border-radius:5px; display:flex; align-items:center; justify-content:center; }
+.pd-sib-badge--major { background:linear-gradient(135deg,#FEF2F2,#FECACA); color:#E02050; }
+.pd-sib-badge--osbp  { background:linear-gradient(135deg,#FFFBEB,#FEF3C7); color:#CC8800; }
+.pd-siblings-more { text-align:center; font-size:10px; color:#94A3B8; padding:6px; }
+
+/* ── OPERATIONAL CARDS ─────────────────────────────────────────── */
+.pd-ops-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:10px; }
+.pd-ops-card {
+  background:linear-gradient(145deg,#FFFFFF,#F4F7FC);
+  border:1.5px solid rgba(0,0,0,.06); border-radius:12px; padding:12px;
+  position:relative; overflow:hidden;
+}
+.pd-ops-card-shine { position:absolute; top:0; left:0; right:0; height:1px; background:linear-gradient(90deg,transparent 20%,rgba(255,255,255,.85) 50%,transparent 80%); }
+.pd-ops-label { font-size:8px; font-weight:700; color:#94A3B8; letter-spacing:.7px; text-transform:uppercase; margin-bottom:5px; }
+.pd-ops-value { font-size:13px; font-weight:700; color:#0B1A30; font-family:'DM Sans',sans-serif; margin-bottom:3px; line-height:1.3; }
+.pd-ops-sub   { font-size:9px; color:#94A3B8; }
+.pd-ops-mode--land  { color:#00A86B; }
+.pd-ops-mode--air   { color:#0070E0; }
+.pd-ops-mode--water { color:#008F7A; }
+
+/* Notes card */
+.pd-notes-card {
+  background:linear-gradient(135deg,#E0ECFF,#CCE0FF);
+  border:1.5px solid rgba(0,112,224,.18); border-radius:12px; padding:14px;
+  margin-bottom:8px; position:relative; overflow:hidden;
+}
+.pd-notes-card-shine { position:absolute; top:0; left:0; right:0; height:1px; background:linear-gradient(90deg,transparent 20%,rgba(255,255,255,.7) 50%,transparent 80%); }
+.pd-notes-hdr  { display:flex; align-items:center; gap:7px; margin-bottom:8px; }
+.pd-notes-ic   { font-size:14px; }
+.pd-notes-title { font-size:10px; font-weight:800; color:#0070E0; letter-spacing:.5px; text-transform:uppercase; }
+.pd-notes-text  { font-size:12px; color:#0B1A30; line-height:1.6; font-weight:500; }
+
+/* Traveler tip */
+.pd-traveler-tip {
+  background:linear-gradient(135deg,#ECFDF5,#D1FAE5);
+  border:1.5px solid rgba(0,168,107,.2); border-radius:12px; padding:13px;
+  position:relative; overflow:hidden;
+}
+.pd-traveler-tip-shine { position:absolute; top:0; left:0; right:0; height:1px; background:linear-gradient(90deg,transparent 20%,rgba(255,255,255,.8) 50%,transparent 80%); }
+.pd-traveler-hdr  { font-size:9px; font-weight:800; color:#00A86B; letter-spacing:.8px; margin-bottom:6px; }
+.pd-traveler-text { font-size:12px; color:#007A50; line-height:1.5; font-weight:600; }
+
+/* ── REFERENCE DATA TABLE ─────────────────────────────────────── */
+.pd-ref-table {
+  background:linear-gradient(145deg,#FFFFFF,#F4F7FC);
+  border:1.5px solid rgba(0,0,0,.06); border-radius:14px;
+  overflow:hidden; position:relative;
+}
+.pd-ref-table::before { content:''; position:absolute; top:0; left:0; right:0; height:1px; background:linear-gradient(90deg,transparent 20%,rgba(255,255,255,.9) 50%,transparent 80%); }
+.pd-ref-row { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; padding:9px 14px; border-bottom:1px solid rgba(0,0,0,.05); flex-wrap:wrap; }
+.pd-ref-row:last-child { border-bottom:none; }
+.pd-ref-key { font-size:9px; font-weight:600; color:#94A3B8; flex-shrink:0; padding-top:2px; min-width:140px; }
+.pd-ref-val { font-size:10px; font-weight:600; color:#475569; font-family:'JetBrains Mono',monospace; word-break:break-all; text-align:right; flex:1; }
+.pd-ref-val--id   { color:#94A3B8; }
+.pd-ref-val--code { color:#0070E0; background:linear-gradient(135deg,#E0ECFF,#CCE0FF); padding:2px 7px; border-radius:4px; }
+.pd-ref-val--url  { color:#008F7A; font-size:9px; }
+
+/* ── PROVENANCE ──────────────────────────────────────────────────── */
+.pd-provenance-card {
+  background:linear-gradient(145deg,#FFFFFF,#F4F7FC);
+  border:1.5px solid rgba(0,0,0,.06); border-radius:14px;
+  overflow:hidden; margin-bottom:10px; position:relative;
+}
+.pd-provenance-card-shine { position:absolute; top:0; left:0; right:0; height:1px; background:linear-gradient(90deg,transparent 20%,rgba(255,255,255,.9) 50%,transparent 80%); }
+.pd-prov-row  { display:flex; align-items:center; justify-content:space-between; padding:9px 14px; border-bottom:1px solid rgba(0,0,0,.05); gap:8px; }
+.pd-prov-row:last-child { border-bottom:none; }
+.pd-prov-key  { font-size:9px; font-weight:600; color:#94A3B8; flex-shrink:0; }
+.pd-prov-val  { font-size:10px; font-weight:600; color:#475569; text-align:right; flex:1; }
+.pd-prov-code { font-size:10px; font-family:'JetBrains Mono',monospace; color:#0070E0; background:linear-gradient(135deg,#E0ECFF,#CCE0FF); padding:2px 7px; border-radius:4px; }
+
+.pd-quality-notes { background:linear-gradient(135deg,#FFFBEB,#FEF3C7); border:1.5px solid rgba(204,136,0,.18); border-radius:12px; padding:13px; }
+.pd-quality-hdr   { font-size:8px; font-weight:800; color:#CC8800; letter-spacing:.8px; text-transform:uppercase; margin-bottom:8px; }
+.pd-quality-row   { display:flex; gap:8px; align-items:flex-start; margin-bottom:6px; }
+.pd-quality-row:last-child { margin-bottom:0; }
+.pd-quality-num   { font-size:9px; font-weight:800; color:#CC8800; font-family:'JetBrains Mono',monospace; flex-shrink:0; margin-top:1px; min-width:14px; }
+.pd-quality-text  { font-size:10px; color:#0B1A30; line-height:1.5; }
+
+/* ── IHR COMPLIANCE BLOCK ─────────────────────────────────────── */
+.pd-ihr-block {
+  background:linear-gradient(135deg, #030D1E 0%, #071428 100%);
+  border:1.5px solid rgba(0,180,255,.15); border-radius:14px; padding:16px;
+  position:relative; overflow:hidden;
+}
+.pd-ihr-block-shine { position:absolute; top:0; left:0; right:0; height:1px; background:linear-gradient(90deg,transparent 15%,rgba(0,180,255,.4) 50%,transparent 85%); }
+.pd-ihr-title { font-size:11px; font-weight:800; color:#00B4FF; margin-bottom:10px; font-family:'DM Sans',sans-serif; }
+.pd-ihr-text  { font-size:11px; color:rgba(255,255,255,.55); line-height:1.7; margin-bottom:14px; }
+.pd-ihr-articles { display:flex; flex-direction:column; gap:7px; margin-bottom:14px; }
+.pd-ihr-article  { display:flex; align-items:center; gap:10px; padding:8px 11px; background:rgba(0,180,255,.06); border-radius:8px; border:1px solid rgba(0,180,255,.1); }
+.pd-ihr-art-num  { font-size:9px; font-weight:800; color:#00B4FF; font-family:'JetBrains Mono',monospace; flex-shrink:0; min-width:58px; }
+.pd-ihr-art-text { font-size:10px; color:rgba(255,255,255,.55); }
+.pd-ihr-offline-notice { display:flex; align-items:flex-start; gap:8px; padding:9px 11px; background:rgba(0,230,118,.05); border-radius:8px; border:1px solid rgba(0,230,118,.12); }
+.pd-ihr-offline-dot { width:7px; height:7px; border-radius:50%; background:#00E676; flex-shrink:0; margin-top:3px; animation:pulse-green 2s infinite; }
+.pd-ihr-offline-notice { font-size:10px; color:rgba(255,255,255,.4); line-height:1.5; }
 </style>

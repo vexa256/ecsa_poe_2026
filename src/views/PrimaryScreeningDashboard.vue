@@ -1,1160 +1,481 @@
 <template>
   <IonPage>
-
-    <!-- ═══ HEADER ═══════════════════════════════════════════════════════ -->
-    <IonHeader class="pd-header" translucent>
-      <IonToolbar class="pd-toolbar">
-        <IonButtons slot="start">
-          <IonMenuButton menu="app-menu" class="pd-menu-btn" />
-        </IonButtons>
-        <div class="pd-title-block" slot="start">
-          <span class="pd-eyebrow">IHR Art.23 · Analytics</span>
-          <span class="pd-title">Screening Dashboard</span>
+    <IonHeader class="sd-hdr" translucent>
+      <IonToolbar class="sd-tb">
+        <IonButtons slot="start"><IonMenuButton menu="app-menu"/></IonButtons>
+        <div class="sd-tb-title" slot="start">
+          <span class="sd-tb-eye">{{ auth.poe_code||'POE' }}</span>
+          <span class="sd-tb-h1">Intelligence</span>
         </div>
         <IonButtons slot="end">
-          <!-- Live ticker pill -->
-          <div class="pd-live-pill" :class="liveData ? 'pd-live-pill--on' : ''">
-            <span class="pd-live-dot" />
-            <span class="pd-live-total">{{ liveData?.total ?? '—' }}</span>
-            <span class="pd-live-lbl">today</span>
-          </div>
-          <!-- Period selector -->
-          <button class="pd-period-btn" @click="periodMenuOpen = !periodMenuOpen">
-            <IonIcon :icon="calendarOutline" />
-            <span>{{ PERIOD_LABELS[activePeriod] }}</span>
-          </button>
-          <IonButton fill="clear" class="pd-refresh-btn" @click="loadAll" :disabled="anyLoading">
-            <IonIcon :icon="refreshOutline" slot="icon-only" />
-          </IonButton>
+          <div :class="['sd-live',liveData&&'sd-live--on']"><span class="sd-live-dot"/><span class="sd-live-n">{{ liveData?.total??'--' }}</span><span class="sd-live-l">today</span></div>
+          <button class="sd-pdf-btn" @click="onPDF" :disabled="pdfBusy">{{ pdfBusy?'...':'PDF' }}</button>
+          <IonButton fill="clear" class="sd-rb" @click="loadAll" :disabled="loading"><IonIcon :icon="refreshOutline" slot="icon-only"/></IonButton>
         </IonButtons>
       </IonToolbar>
-
-      <!-- Period dropdown -->
-      <div v-if="periodMenuOpen" class="pd-period-menu">
-        <button v-for="p in PERIODS" :key="p.v"
-          :class="['pd-period-opt', activePeriod === p.v && 'pd-period-opt--on']"
-          @click="setPeriod(p.v)">
-          {{ p.label }}
-          <IonIcon v-if="activePeriod === p.v" :icon="checkmarkOutline" />
-        </button>
+      <!-- Filters -->
+      <div class="sd-fb">
+        <div class="sd-fs"><button v-for="p in QUICK_PERIODS" :key="p.v" :class="['sd-fp',activeFilter===p.v&&'sd-fp--on']" @click="setFilter(p.v)">{{ p.l }}</button></div>
+        <button :class="['sd-ft',showAdvFilter&&'sd-ft--on']" @click="showAdvFilter=!showAdvFilter">{{ advFilterCount?advFilterCount+' ':''}}&equiv;</button>
       </div>
+      <transition name="sd-sl"><div v-if="showAdvFilter" class="sd-af">
+        <div class="sd-ar"><span class="sd-al">Date</span><input type="date" v-model="filterDate" class="sd-ai" @change="activeFilter='custom'"/></div>
+        <div class="sd-ar"><span class="sd-al">Month</span><div class="sd-ap"><button v-for="m in MONTHS" :key="m.v" :class="['sd-pill',filterMonth===m.v&&'sd-pill--on']" @click="filterMonth=filterMonth===m.v?null:m.v;activeFilter='custom'">{{ m.l }}</button></div></div>
+        <div class="sd-ar"><span class="sd-al">Year</span><div class="sd-ap"><button v-for="y in YEARS" :key="y" :class="['sd-pill',filterYear===y&&'sd-pill--on']" @click="filterYear=filterYear===y?null:y;activeFilter='custom'">{{ y }}</button></div></div>
+        <div class="sd-ar"><span class="sd-al">Range</span><input type="date" v-model="filterFrom" class="sd-ai sd-ai--h" @change="activeFilter='custom'"/><input type="date" v-model="filterTo" class="sd-ai sd-ai--h" @change="activeFilter='custom'"/></div>
+        <div class="sd-aa"><button class="sd-apply" @click="loadAll();showAdvFilter=false">Apply</button><button class="sd-clear" @click="clearFilters">Clear</button></div>
+      </div></transition>
     </IonHeader>
 
-    <!-- ═══ CONTENT ══════════════════════════════════════════════════════ -->
-    <IonContent class="pd-content" :fullscreen="true">
-      <IonRefresher slot="fixed" @ionRefresh="onPullRefresh($event)">
-        <IonRefresherContent pulling-text="Pull to refresh" refreshing-spinner="crescent" />
-      </IonRefresher>
+    <IonContent class="sd-c" :fullscreen="true">
+      <IonRefresher slot="fixed" @ionRefresh="pullRefresh($event)"><IonRefresherContent pulling-text="Pull to refresh" refreshing-spinner="crescent"/></IonRefresher>
 
-      <!-- Global loading -->
-      <div v-if="anyLoading && !summary" class="pd-global-loading">
-        <IonSpinner name="crescent" class="pd-main-spinner" />
-        <p>Loading analytics…</p>
-      </div>
+      <!-- Offline banner -->
+      <div v-if="!isOnline" class="sd-offline">Offline -- showing cached data{{ lastSyncAt?' from '+fmtRel(lastSyncAt):'' }}</div>
 
-      <div v-else class="pd-body">
+      <!-- Loading -->
+      <div v-if="loading&&!sum" class="sd-ld"><IonSpinner name="crescent"/><p>Loading...</p></div>
 
-        <!-- ── SECTION 1: TODAY KPI HERO STRIP ─────────────────────────── -->
-        <div class="pd-kpi-strip">
-          <!-- Symptomatic rate radial — hero card -->
-          <div class="pd-hero-card">
-            <div class="pd-hero-chart">
-              <VueApexcharts
-                v-if="radialOpts"
-                type="radialBar"
-                height="160"
-                :options="radialOpts"
-                :series="radialSeries"
-              />
-              <div v-else class="pd-chart-skeleton" style="height:160px" />
-            </div>
-            <div class="pd-hero-meta">
-              <span class="pd-hero-val">{{ summary?.today?.total ?? '—' }}</span>
-              <span class="pd-hero-lbl">screened today</span>
-              <span class="pd-hero-delta" :class="deltaClass">
-                {{ deltaArrow }}{{ Math.abs(summary?.today?.vs_yesterday ?? 0) }} vs yesterday
-              </span>
-            </div>
+      <div v-else class="sd-b">
+        <!-- ═══ HERO ══════════════════════════════════════════════════ -->
+        <div class="sd-hero" @click="openSheet('summary')">
+          <div class="sd-ring-w">
+            <svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="42" fill="none" stroke="#E8EDF5" stroke-width="6"/><circle cx="50" cy="50" r="42" fill="none" :stroke="srColor" stroke-width="6" stroke-linecap="round" :stroke-dasharray="srDash" transform="rotate(-90 50 50)" class="sd-ring-anim"/></svg>
+            <div class="sd-ring-ctr"><span class="sd-ring-pct">{{ sr }}<small>%</small></span><span class="sd-ring-lbl">symp</span></div>
           </div>
-
-          <!-- KPI cards scroll row -->
-          <div class="pd-kpi-row">
-            <div class="pd-kpi-card pd-kpi--sym">
-              <span class="pd-kpi-ico">⚠</span>
-              <span class="pd-kpi-num">{{ summary?.today?.symptomatic ?? '—' }}</span>
-              <span class="pd-kpi-sub">Symptomatic</span>
-            </div>
-            <div class="pd-kpi-card pd-kpi--ref">
-              <span class="pd-kpi-ico">↗</span>
-              <span class="pd-kpi-num">{{ summary?.today?.referrals ?? '—' }}</span>
-              <span class="pd-kpi-sub">Referred</span>
-            </div>
-            <div class="pd-kpi-card pd-kpi--fever">
-              <span class="pd-kpi-ico">🌡</span>
-              <span class="pd-kpi-num">{{ summary?.today?.fever_count ?? '—' }}</span>
-              <span class="pd-kpi-sub">Fever ≥37.5°</span>
-            </div>
-            <div class="pd-kpi-card pd-kpi--queue" :class="(summary?.referral_queue?.critical_open ?? 0) > 0 && 'pd-kpi--critical'">
-              <span class="pd-kpi-ico">📋</span>
-              <span class="pd-kpi-num">{{ summary?.referral_queue?.open ?? '—' }}</span>
-              <span class="pd-kpi-sub">Open Referrals</span>
-            </div>
-            <div class="pd-kpi-card pd-kpi--alert" :class="(summary?.alerts?.critical_open ?? 0) > 0 && 'pd-kpi--critical'">
-              <span class="pd-kpi-ico">🔔</span>
-              <span class="pd-kpi-num">{{ summary?.alerts?.open ?? '—' }}</span>
-              <span class="pd-kpi-sub">Open Alerts</span>
-            </div>
-            <div class="pd-kpi-card pd-kpi--week">
-              <span class="pd-kpi-ico">📅</span>
-              <span class="pd-kpi-num">{{ summary?.this_week?.total ?? '—' }}</span>
-              <span class="pd-kpi-sub">This Week</span>
+          <div class="sd-hero-r">
+            <div class="sd-hero-big">{{ sum?.all_time?.total??'--' }}</div>
+            <div class="sd-hero-sub">Total Screened</div>
+            <div class="sd-hero-row">
+              <div class="sd-hm"><span class="sd-hm-v">{{ sum?.today?.total??0 }}</span><span class="sd-hm-l">Today</span></div>
+              <div class="sd-hm" :class="delta>=0?'sd-hm--up':'sd-hm--dn'"><span class="sd-hm-v">{{ delta>=0?'+':'' }}{{ delta }}</span><span class="sd-hm-l">vs Yday</span></div>
+              <div class="sd-hm"><span class="sd-hm-v">{{ sum?.this_week?.total??0 }}</span><span class="sd-hm-l">Week</span></div>
+              <div class="sd-hm"><span class="sd-hm-v">{{ sum?.this_month?.total??0 }}</span><span class="sd-hm-l">Month</span></div>
             </div>
           </div>
         </div>
 
-        <!-- ── SECTION 2: 7-DAY TREND AREA CHART ──────────────────────── -->
-        <div class="pd-card">
-          <div class="pd-card-hdr">
-            <span class="pd-card-title">Screening Trend</span>
-            <span class="pd-card-sub">{{ PERIOD_LABELS[activePeriod] }} · rolling avg</span>
+        <!-- ═══ QUICK STATS ═══════════════════════════════════════════ -->
+        <div class="sd-qs">
+          <div class="sd-q"><span class="sd-qn">{{ sum?.all_time?.completed??0 }}</span><span class="sd-ql">Completed</span></div>
+          <div class="sd-q sd-q--r"><span class="sd-qn">{{ sum?.all_time?.symptomatic??0 }}</span><span class="sd-ql">Symptomatic</span></div>
+          <div class="sd-q"><span class="sd-qn">{{ sum?.all_time?.referrals??0 }}</span><span class="sd-ql">Referrals</span></div>
+          <div class="sd-q" :class="(sum?.today?.fever_count??0)>0&&'sd-q--a'"><span class="sd-qn">{{ sum?.today?.fever_count??0 }}</span><span class="sd-ql">Fever Today</span></div>
+          <div class="sd-q" :class="(sum?.referral_queue?.open??0)>0&&'sd-q--a'" @click="openSheet('referrals')"><span class="sd-qn">{{ sum?.referral_queue?.open??0 }}</span><span class="sd-ql">Open Ref</span></div>
+          <div class="sd-q" :class="(sum?.alerts?.open??0)>0&&'sd-q--r'"><span class="sd-qn">{{ sum?.alerts?.open??0 }}</span><span class="sd-ql">Alerts</span></div>
+          <div class="sd-q" :class="(sum?.all_time?.unsynced??0)>0&&'sd-q--a'"><span class="sd-qn">{{ sum?.all_time?.unsynced??0 }}</span><span class="sd-ql">Unsynced</span></div>
+          <div class="sd-q"><span class="sd-qn">{{ sum?.all_time?.voided??0 }}</span><span class="sd-ql">Voided</span></div>
+        </div>
+
+        <!-- ═══ SIGNALS ═══════════════════════════════════════════════ -->
+        <template v-if="signals.length">
+          <div class="sd-sh"><span class="sd-sh-dot"/><span class="sd-sh-t">Signals</span><span class="sd-sh-b">{{ signals.length }}</span></div>
+          <div class="sd-sigs">
+            <div v-for="(s,i) in signals" :key="i" :class="['sd-sig','sd-sig--'+s.level]" @click="activeSig=s">
+              <span class="sd-sig-i">{{ s.ico }}</span>
+              <div class="sd-sig-b"><span class="sd-sig-c">{{ s.category }}</span><span class="sd-sig-t">{{ s.title }}</span><span class="sd-sig-d">{{ s.desc.length>100?s.desc.slice(0,100)+'...':s.desc }}</span></div>
+            </div>
           </div>
-          <div v-if="trendOpts && !trendLoading" class="pd-chart-wrap">
-            <VueApexcharts type="area" height="200" :options="trendOpts" :series="trendSeries" />
-          </div>
-          <div v-else class="pd-chart-skeleton" style="height:200px">
-            <IonSpinner v-if="trendLoading" name="crescent" class="pd-sk-spin" />
+        </template>
+
+        <!-- ═══ TREND ═════════════════════════════════════════════════ -->
+        <div class="sd-card" v-if="trend?.series?.length">
+          <div class="sd-ch"><span class="sd-ct">Trend</span><span class="sd-cs">{{ filterLabel }}</span></div>
+          <div class="sd-tw">
+            <svg :viewBox="'0 0 '+TW+' 80'" class="sd-tsvg" preserveAspectRatio="none">
+              <path :d="trendAreaPath('total')" fill="#1565C0" opacity=".1"/>
+              <polyline :points="trendLine('total')" fill="none" stroke="#1565C0" stroke-width="2" stroke-linejoin="round"/>
+              <polyline :points="trendLine('symptomatic')" fill="none" stroke="#E53935" stroke-width="1.5" stroke-linejoin="round" stroke-dasharray="4,3"/>
+            </svg>
+            <div class="sd-txl"><span v-for="(l,i) in trendLabels" :key="i">{{ l }}</span></div>
+            <div class="sd-tleg"><span class="sd-tl sd-tl--t">Total</span><span class="sd-tl sd-tl--s">Symptomatic</span></div>
           </div>
         </div>
 
-        <!-- ── SECTION 3: GENDER + SYMPTOMATIC RATE ────────────────────── -->
-        <div class="pd-row-2">
-          <!-- Gender donut -->
-          <div class="pd-card pd-card--half">
-            <div class="pd-card-hdr">
-              <span class="pd-card-title">Gender</span>
-            </div>
-            <div v-if="genderOpts && !epiLoading" class="pd-chart-wrap">
-              <VueApexcharts type="donut" height="180" :options="genderOpts" :series="genderSeries" />
-            </div>
-            <div v-else class="pd-chart-skeleton" style="height:180px" />
-          </div>
+        <!-- ═══ GENDER ════════════════════════════════════════════════ -->
+        <div class="sd-card" v-if="epi?.by_gender?.length">
+          <div class="sd-ch"><span class="sd-ct">Gender</span></div>
+          <div class="sd-bars"><div v-for="g in epi.by_gender" :key="g.gender" class="sd-bar">
+            <span class="sd-bl">{{ GS[g.gender] }}</span><div class="sd-bt"><div :class="['sd-bf','sd-bf--'+g.gender.toLowerCase()]" :style="{width:genderPct(g)+'%'}"/></div><span class="sd-bv">{{ g.total }}</span>
+          </div></div>
+        </div>
 
-          <!-- Temperature bands radial -->
-          <div class="pd-card pd-card--half">
-            <div class="pd-card-hdr">
-              <span class="pd-card-title">Temperature</span>
-            </div>
-            <div v-if="tempBandOpts && !epiLoading" class="pd-chart-wrap">
-              <VueApexcharts type="radialBar" height="180" :options="tempBandOpts" :series="tempBandSeries" />
-            </div>
-            <div v-else class="pd-chart-skeleton" style="height:180px" />
+        <!-- ═══ TEMPERATURE ═══════════════════════════════════════════ -->
+        <div class="sd-card" v-if="epi?.temperature?.bands" @click="openSheet('temperature')">
+          <div class="sd-ch"><span class="sd-ct">Temperature</span><span class="sd-cs">avg {{ epi.temperature.avg_c?.toFixed(1)||'--' }}C</span></div>
+          <div class="sd-ts">
+            <div class="sd-tsb"><div v-for="b in tBands" :key="b.k" class="sd-tss" :style="{flex:b.n||0.01,background:b.c}"/></div>
+            <div class="sd-tsl"><div v-for="b in tBands" :key="b.k" class="sd-tsi"><span class="sd-tsd" :style="{background:b.c}"/><span>{{ b.l }} {{ b.n }} ({{ b.p }}%)</span></div></div>
           </div>
         </div>
 
-        <!-- ── SECTION 4: HOURLY HEATMAP ───────────────────────────────── -->
-        <div class="pd-card">
-          <div class="pd-card-hdr">
-            <span class="pd-card-title">Peak Screening Hours</span>
-            <span class="pd-card-sub">Volume by hour of day</span>
-          </div>
-          <div v-if="hourlyOpts && !heatmapLoading" class="pd-chart-wrap">
-            <VueApexcharts type="bar" height="160" :options="hourlyOpts" :series="hourlySeries" />
-          </div>
-          <div v-else class="pd-chart-skeleton" style="height:160px" />
+        <!-- ═══ SYNDROMES ═════════════════════════════════════════════ -->
+        <div class="sd-card" v-if="epi?.syndromes?.length">
+          <div class="sd-ch"><span class="sd-ct">Syndromes</span></div>
+          <div class="sd-bars"><div v-for="s in epi.syndromes" :key="s.syndrome" class="sd-bar">
+            <span class="sd-bl sd-bl--w">{{ s.syndrome.replace(/_/g,' ') }}</span><div class="sd-bt"><div class="sd-bf sd-bf--syn" :style="{width:synPct(s)+'%'}"/></div><span class="sd-bv">{{ s.count }}</span>
+          </div></div>
         </div>
 
-        <!-- ── SECTION 5: REFERRAL FUNNEL ─────────────────────────────── -->
-        <div class="pd-card">
-          <div class="pd-card-hdr">
-            <span class="pd-card-title">Referral Funnel</span>
-            <span class="pd-card-sub">Primary → Secondary conversion</span>
-          </div>
-          <div v-if="funnelOpts && !funnelLoading" class="pd-chart-wrap">
-            <VueApexcharts type="bar" height="200" :options="funnelOpts" :series="funnelSeries" />
-          </div>
-          <div v-else class="pd-chart-skeleton" style="height:200px" />
-          <!-- Funnel KPIs below chart -->
-          <div v-if="funnelData" class="pd-funnel-kpis">
-            <div class="pd-fkpi">
-              <span class="pd-fkpi-val">{{ funnelData?.notifications?.avg_pickup_minutes ?? '—' }}</span>
-              <span class="pd-fkpi-lbl">min avg pickup</span>
-            </div>
-            <div class="pd-fkpi">
-              <span class="pd-fkpi-val">{{ funnelData?.secondary_cases?.avg_case_duration_minutes ?? '—' }}</span>
-              <span class="pd-fkpi-lbl">min avg case</span>
-            </div>
-            <div class="pd-fkpi">
-              <span class="pd-fkpi-val pd-fkpi--warn">{{ funnelData?.notifications?.open ?? '—' }}</span>
-              <span class="pd-fkpi-lbl">open referrals</span>
-            </div>
-            <div class="pd-fkpi">
-              <span class="pd-fkpi-val pd-fkpi--danger">{{ funnelData?.secondary_cases?.risk_critical ?? '—' }}</span>
-              <span class="pd-fkpi-lbl">critical cases</span>
-            </div>
-          </div>
+        <!-- ═══ HOURS ═════════════════════════════════════════════════ -->
+        <div class="sd-card" v-if="hmap?.buckets?.length">
+          <div class="sd-ch"><span class="sd-ct">Peak Hours</span></div>
+          <div class="sd-hrs"><div v-for="b in hmap.buckets" :key="b.bucket" class="sd-hc" :class="b.bucket%2!==0&&'sd-hc--odd'">
+            <div class="sd-hbw"><div class="sd-hb" :style="{height:hourPct(b)+'%'}" :class="b.bucket===peakH&&'sd-hb--pk'"/></div><span class="sd-hl">{{ b.label }}</span>
+          </div></div>
         </div>
 
-        <!-- ── SECTION 6: WEEKDAY SYMPTOMATIC HEATMAP ─────────────────── -->
-        <div class="pd-card">
-          <div class="pd-card-hdr">
-            <span class="pd-card-title">Risk by Weekday</span>
-            <span class="pd-card-sub">Symptomatic rate per day</span>
-          </div>
-          <div v-if="weekdayOpts && !epiLoading" class="pd-chart-wrap">
-            <VueApexcharts type="bar" height="160" :options="weekdayOpts" :series="weekdaySeries" />
-          </div>
-          <div v-else class="pd-chart-skeleton" style="height:160px" />
+        <!-- ═══ FUNNEL ════════════════════════════════════════════════ -->
+        <div class="sd-card" v-if="fun?.funnel?.length">
+          <div class="sd-ch"><span class="sd-ct">Referral Pipeline</span></div>
+          <div class="sd-fun"><div v-for="f in fun.funnel" :key="f.stage" class="sd-fn">
+            <div class="sd-fnb" :style="{width:funnelPct(f)+'%'}"/><div class="sd-fnf"><span class="sd-fnn">{{ f.count }}</span><span class="sd-fnl">{{ f.description||f.stage }}</span><span class="sd-fnp">{{ f.rate }}%</span></div>
+          </div></div>
+          <div class="sd-fk"><div class="sd-fki"><span class="sd-fkv">{{ fun.notifications?.avg_pickup_minutes??'--' }}</span><span class="sd-fkl">min pickup</span></div><div class="sd-fki"><span class="sd-fkv">{{ fun.secondary_cases?.avg_case_duration_minutes??'--' }}</span><span class="sd-fkl">min/case</span></div><div class="sd-fki"><span class="sd-fkv" :class="(fun.notifications?.open??0)>0&&'sd-fkv--w'">{{ fun.notifications?.open??0 }}</span><span class="sd-fkl">open</span></div><div class="sd-fki"><span class="sd-fkv" :class="(fun.secondary_cases?.risk_critical??0)>0&&'sd-fkv--d'">{{ fun.secondary_cases?.risk_critical??0 }}</span><span class="sd-fkl">crit</span></div></div>
         </div>
 
-        <!-- ── SECTION 7: WEEKLY REPORT SUMMARY ───────────────────────── -->
-        <div class="pd-card" v-if="weeklyData">
-          <div class="pd-card-hdr">
-            <span class="pd-card-title">Weekly Report</span>
-            <span class="pd-card-sub">{{ weeklyData.week_label }}</span>
-          </div>
-          <div class="pd-weekly-grid">
-            <div class="pd-wg-item">
-              <span class="pd-wg-val">{{ weeklyData.report?.total_screened ?? '—' }}</span>
-              <span class="pd-wg-lbl">Screened</span>
-            </div>
-            <div class="pd-wg-item pd-wg--sym">
-              <span class="pd-wg-val">{{ weeklyData.report?.symptomatic_rate ?? '—' }}%</span>
-              <span class="pd-wg-lbl">Symp. Rate</span>
-            </div>
-            <div class="pd-wg-item">
-              <span class="pd-wg-val">{{ weeklyData.report?.total_referrals ?? '—' }}</span>
-              <span class="pd-wg-lbl">Referrals</span>
-            </div>
-            <div class="pd-wg-item pd-wg--fever">
-              <span class="pd-wg-val">{{ weeklyData.report?.fever_count ?? '—' }}</span>
-              <span class="pd-wg-lbl">Fever</span>
-            </div>
-            <div class="pd-wg-item">
-              <span class="pd-wg-val">{{ weeklyData.report?.avg_daily ?? '—' }}</span>
-              <span class="pd-wg-lbl">Avg/Day</span>
-            </div>
-            <div class="pd-wg-item" :class="(weeklyData.report?.vs_previous_week ?? 0) >= 0 ? 'pd-wg--up' : 'pd-wg--down'">
-              <span class="pd-wg-val">
-                {{ (weeklyData.report?.vs_previous_week ?? 0) >= 0 ? '▲' : '▼' }}{{ Math.abs(weeklyData.report?.vs_previous_week ?? 0) }}
-              </span>
-              <span class="pd-wg-lbl">vs Last Week</span>
-            </div>
-          </div>
-          <!-- Gender breakdown mini-bar -->
-          <div class="pd-gender-mini">
-            <div class="pd-gm-bar">
-              <div class="pd-gm-seg pd-gm--m" :style="{flex: weeklyData.report?.male ?? 1}" title="Male" />
-              <div class="pd-gm-seg pd-gm--f" :style="{flex: weeklyData.report?.female ?? 1}" title="Female" />
-              <div class="pd-gm-seg pd-gm--o" :style="{flex: (weeklyData.report?.other ?? 0) + (weeklyData.report?.unknown ?? 0)}" title="Other/Unknown" />
-            </div>
-            <div class="pd-gm-legend">
-              <span class="pd-gml pd-gml--m">Male {{ weeklyData.report?.male ?? 0 }}</span>
-              <span class="pd-gml pd-gml--f">Female {{ weeklyData.report?.female ?? 0 }}</span>
-              <span class="pd-gml pd-gml--o">Other {{ (weeklyData.report?.other ?? 0) + (weeklyData.report?.unknown ?? 0) }}</span>
-            </div>
-          </div>
+        <!-- ═══ SECONDARY ═════════════════════════════════════════════ -->
+        <div class="sd-card" v-if="fun?.secondary_cases?.total" @click="openSheet('secondary')">
+          <div class="sd-ch"><span class="sd-ct">Secondary Cases</span><span class="sd-cs">{{ fun.secondary_cases.total }}</span></div>
+          <div class="sd-grid"><div class="sd-gc"><span class="sd-gn sd-gn--bl">{{ fun.secondary_cases.open??0 }}</span><span class="sd-gl">Open</span></div><div class="sd-gc"><span class="sd-gn sd-gn--am">{{ fun.secondary_cases.in_progress??0 }}</span><span class="sd-gl">In Prog</span></div><div class="sd-gc"><span class="sd-gn sd-gn--gr">{{ fun.secondary_cases.closed??0 }}</span><span class="sd-gl">Closed</span></div><div class="sd-gc"><span class="sd-gn sd-gn--rd">{{ fun.secondary_cases.risk_critical??0 }}</span><span class="sd-gl">Critical</span></div><div class="sd-gc"><span class="sd-gn sd-gn--or">{{ fun.secondary_cases.risk_high??0 }}</span><span class="sd-gl">High</span></div><div class="sd-gc"><span class="sd-gn">{{ fun.secondary_cases.quarantined??0 }}</span><span class="sd-gl">Quarant</span></div></div>
         </div>
 
-        <!-- ── SECTION 8: DEVICE HEALTH ────────────────────────────────── -->
-        <div class="pd-card" v-if="deviceData?.devices?.length">
-          <div class="pd-card-hdr">
-            <span class="pd-card-title">Device Sync Health</span>
-            <span class="pd-card-sub">{{ deviceData.device_count }} devices</span>
-            <span v-if="deviceData.devices_at_risk > 0" class="pd-at-risk-badge">
-              ⚠ {{ deviceData.devices_at_risk }} at risk
-            </span>
-          </div>
-          <!-- Sync health stacked bar -->
-          <div v-if="syncHealthOpts" class="pd-chart-wrap">
-            <VueApexcharts type="bar" height="120" :options="syncHealthOpts" :series="syncHealthSeries" />
-          </div>
-          <!-- Device list (top 5) -->
-          <div class="pd-device-list">
-            <div v-for="d in deviceData.devices.slice(0,5)" :key="d.device_id"
-              :class="['pd-device-row', 'pd-device-row--'+d.status.toLowerCase()]">
-              <div class="pd-device-info">
-                <span class="pd-device-id">{{ d.device_id }}</span>
-                <span class="pd-device-meta">{{ d.platform }} · {{ d.total_records }} records</span>
-              </div>
-              <div class="pd-device-right">
-                <span :class="['pd-device-status', 'pd-ds--'+d.status.toLowerCase()]">
-                  {{ d.status }}
-                </span>
-                <span v-if="d.unsynced > 0" class="pd-device-unsynced">{{ d.unsynced }} pending</span>
-              </div>
-            </div>
-          </div>
+        <!-- ═══ ALERTS ════════════════════════════════════════════════ -->
+        <div class="sd-card" v-if="alertsData?.totals">
+          <div class="sd-ch"><span class="sd-ct">IHR Alerts</span><span v-if="alertsData.totals.open" class="sd-cbadge">{{ alertsData.totals.open }}</span></div>
+          <div class="sd-grid"><div class="sd-gc"><span class="sd-gn">{{ alertsData.totals.total??0 }}</span><span class="sd-gl">Total</span></div><div class="sd-gc"><span class="sd-gn sd-gn--rd">{{ alertsData.totals.open??0 }}</span><span class="sd-gl">Open</span></div><div class="sd-gc"><span class="sd-gn sd-gn--am">{{ alertsData.totals.acknowledged??0 }}</span><span class="sd-gl">Ack</span></div><div class="sd-gc"><span class="sd-gn sd-gn--gr">{{ alertsData.totals.closed??0 }}</span><span class="sd-gl">Closed</span></div><div class="sd-gc"><span class="sd-gn sd-gn--rd">{{ alertsData.totals.critical??0 }}</span><span class="sd-gl">Crit</span></div><div class="sd-gc"><span class="sd-gn">{{ alertsData.totals.avg_ack_minutes??'--' }}</span><span class="sd-gl">min ack</span></div></div>
         </div>
 
-        <!-- ── SECTION 9: SCREENER LEADERBOARD ────────────────────────── -->
-        <div class="pd-card" v-if="screenerData?.screeners?.length">
-          <div class="pd-card-hdr">
-            <span class="pd-card-title">Officer Activity</span>
-            <span class="pd-card-sub">{{ screenerData.screener_count }} officers · {{ PERIOD_LABELS[activePeriod] }}</span>
-          </div>
-          <div v-if="screenerBarOpts" class="pd-chart-wrap">
-            <VueApexcharts type="bar" height="180" :options="screenerBarOpts" :series="screenerBarSeries" />
-          </div>
-          <div v-else class="pd-chart-skeleton" style="height:180px" />
+        <!-- ═══ WEEKLY ════════════════════════════════════════════════ -->
+        <div class="sd-card" v-if="weekly?.report">
+          <div class="sd-ch"><span class="sd-ct">Weekly</span><span class="sd-cs">{{ weekly.week_label }}</span></div>
+          <div class="sd-grid"><div class="sd-gc"><span class="sd-gn">{{ weekly.report.total_screened??0 }}</span><span class="sd-gl">Screened</span></div><div class="sd-gc"><span class="sd-gn sd-gn--rd">{{ weekly.report.symptomatic_rate??0 }}%</span><span class="sd-gl">Symp%</span></div><div class="sd-gc"><span class="sd-gn">{{ weekly.report.total_referrals??0 }}</span><span class="sd-gl">Ref</span></div><div class="sd-gc"><span class="sd-gn sd-gn--am">{{ weekly.report.fever_count??0 }}</span><span class="sd-gl">Fever</span></div><div class="sd-gc"><span class="sd-gn">{{ weekly.report.avg_daily??0 }}</span><span class="sd-gl">Avg/d</span></div><div class="sd-gc"><span class="sd-gn" :class="(weekly.report.vs_previous_week??0)>=0?'sd-gn--gr':'sd-gn--rd'">{{ (weekly.report.vs_previous_week??0)>=0?'+':'' }}{{ weekly.report.vs_previous_week??0 }}</span><span class="sd-gl">vs last</span></div></div>
         </div>
 
-        <!-- Bottom pad -->
-        <div style="height:40px" />
+        <!-- ═══ DEVICES ═══════════════════════════════════════════════ -->
+        <div class="sd-card" v-if="devices?.devices?.length">
+          <div class="sd-ch"><span class="sd-ct">Devices</span><span class="sd-cs">{{ devices.device_count }}</span><span v-if="devices.devices_at_risk" class="sd-cbadge sd-cbadge--w">{{ devices.devices_at_risk }}</span></div>
+          <div v-for="d in devices.devices.slice(0,5)" :key="d.device_id" class="sd-dev"><div class="sd-dev-l"><span class="sd-dev-id">{{ d.device_id }}</span><span class="sd-dev-m">{{ d.platform }} {{ d.total_records }}rec</span></div><span :class="['sd-dev-s','sd-dev-s--'+d.status.toLowerCase()]">{{ d.status }}</span></div>
+        </div>
+
+        <!-- ═══ OFFICERS ══════════════════════════════════════════════ -->
+        <div class="sd-card" v-if="officers?.screeners?.length">
+          <div class="sd-ch"><span class="sd-ct">Officers</span><span class="sd-cs">{{ officers.screener_count }}</span></div>
+          <div v-for="o in officers.screeners.slice(0,6)" :key="o.user_id" class="sd-off"><span class="sd-off-n">{{ o.full_name||o.username }}</span><div class="sd-off-bw"><div class="sd-off-b" :style="{width:officerPct(o)+'%'}"/></div><span class="sd-off-v">{{ o.total }}</span></div>
+        </div>
+
+        <div style="height:40px"/>
       </div>
     </IonContent>
 
-    <!-- Toast -->
-    <IonToast :is-open="toast.show" :message="toast.msg" :color="toast.color" :duration="3000"
-      position="top" @didDismiss="toast.show=false" />
+    <!-- ═══ DETAIL SHEET ══════════════════════════════════════════════ -->
+    <IonModal :is-open="!!sheet" @didDismiss="sheet=null" :initial-breakpoint="1" :breakpoints="[0,1]" class="sd-modal">
+      <IonHeader><IonToolbar class="sd-st"><div slot="start" class="sd-handle"/><IonButtons slot="end"><IonButton fill="clear" @click="sheet=null">Close</IonButton></IonButtons></IonToolbar></IonHeader>
+      <IonContent class="sd-sc" v-if="sheet">
+        <div class="sd-sp">
+          <template v-if="sheet==='summary'">
+            <h2 class="sd-mt">Full Summary</h2>
+            <div class="sd-dg"><div class="sd-dr" v-for="r in summaryRows" :key="r[0]"><span class="sd-dk">{{ r[0] }}</span><span :class="['sd-dv',r[2]||'']">{{ r[1] }}</span></div></div>
+          </template>
+          <template v-if="sheet==='referrals'">
+            <h2 class="sd-mt">Referral Queue</h2>
+            <div class="sd-dg"><div class="sd-dr" v-for="r in referralRows" :key="r[0]"><span class="sd-dk">{{ r[0] }}</span><span :class="['sd-dv',r[2]||'']">{{ r[1] }}</span></div></div>
+          </template>
+          <template v-if="sheet==='temperature'">
+            <h2 class="sd-mt">Temperature Analysis</h2>
+            <div class="sd-dg"><div class="sd-dr" v-for="r in tempRows" :key="r[0]"><span class="sd-dk">{{ r[0] }}</span><span :class="['sd-dv',r[2]||'']">{{ r[1] }}</span></div></div>
+          </template>
+          <template v-if="sheet==='secondary'">
+            <h2 class="sd-mt">Secondary Cases</h2>
+            <div class="sd-dg"><div class="sd-dr" v-for="r in secRows" :key="r[0]"><span class="sd-dk">{{ r[0] }}</span><span :class="['sd-dv',r[2]||'']">{{ r[1] }}</span></div></div>
+          </template>
+        </div>
+        <div style="height:40px"/>
+      </IonContent>
+    </IonModal>
+
+    <!-- ═══ SIGNAL SHEET ══════════════════════════════════════════════ -->
+    <IonModal :is-open="!!activeSig" @didDismiss="activeSig=null" :initial-breakpoint="1" :breakpoints="[0,1]" class="sd-modal">
+      <IonHeader><IonToolbar class="sd-st"><div slot="start" class="sd-handle"/><IonButtons slot="end"><IonButton fill="clear" @click="activeSig=null">Close</IonButton></IonButtons></IonToolbar></IonHeader>
+      <IonContent class="sd-sc" v-if="activeSig">
+        <div class="sd-sp">
+          <div :class="['sd-sig-hdr','sd-sig-hdr--'+activeSig.level]"><span class="sd-sig-hc">{{ activeSig.category }}</span><span class="sd-sig-ht">{{ activeSig.title }}</span></div>
+          <p class="sd-sig-desc">{{ activeSig.desc }}</p>
+          <div v-if="activeSig.action" class="sd-sig-act"><span class="sd-sig-al">RECOMMENDED ACTION</span><p class="sd-sig-at">{{ activeSig.action }}</p></div>
+        </div>
+        <div style="height:40px"/>
+      </IonContent>
+    </IonModal>
+
+    <IonToast :is-open="toast.show" :message="toast.msg" :color="toast.color" :duration="3000" position="top" @didDismiss="toast.show=false"/>
   </IonPage>
 </template>
 
 <script setup>
-// ─────────────────────────────────────────────────────────────────────────────
-// ECSA-HC POE SENTINEL — PrimaryDashboard.vue
-// WHO/IHR 2005 · Primary Screening Analytics Dashboard
-//
-// Chart library: ApexCharts + vue3-apexcharts
-// Install: npm install apexcharts vue3-apexcharts
-// Register globally in main.ts / main.js:
-//   import VueApexCharts from 'vue3-apexcharts'
-//   app.use(VueApexCharts)
-//
-// All API calls go to the PrimaryScreeningDashboardController routes.
-// No IDB reads in this view — dashboard is a server-only analytics surface.
-// ─────────────────────────────────────────────────────────────────────────────
+import { IonPage,IonHeader,IonToolbar,IonButtons,IonMenuButton,IonButton,IonContent,IonIcon,IonSpinner,IonRefresher,IonRefresherContent,IonToast,IonModal } from '@ionic/vue'
+import { refreshOutline } from 'ionicons/icons'
+import { ref, reactive, computed } from 'vue'
+import { useIntelligenceData, QUICK_PERIODS, MONTHS, YEARS, GS, TW } from '@/composables/useIntelligenceData'
+import { useIntelligenceAI } from '@/composables/useIntelligenceAI'
 
-import { ref, computed, reactive, onMounted, onUnmounted } from 'vue'
-import {
-  IonPage, IonHeader, IonToolbar, IonButtons, IonMenuButton,
-  IonButton, IonContent, IonIcon, IonSpinner,
-  IonRefresher, IonRefresherContent, IonToast,
-  onIonViewWillEnter,
-} from '@ionic/vue'
-import {
-  refreshOutline, calendarOutline, checkmarkOutline,
-} from 'ionicons/icons'
-import { APP } from '@/services/poeDB'
+const {
+  auth,isOnline,activeFilter,showAdvFilter,filterDate,filterMonth,filterYear,
+  filterFrom,filterTo,advFilterCount,filterLabel,setFilter,clearFilters,
+  loading,sum,trend,hmap,fun,epi,devices,officers,weekly,alertsData,liveData,lastSyncAt,
+  sr,srColor,srDash,delta,peakH,tBands,trendLabels,
+  trendLine,trendAreaPath,genderPct,synPct,hourPct,officerPct,funnelPct,
+  loadAll,pullRefresh,
+} = useIntelligenceData()
+const { signals, generatePDFReport } = useIntelligenceAI({ sum,sr,delta,fun,weekly,epi,alertsData,devices,officers })
 
-// ── ApexCharts: imported locally so this works even without global app.use(VueApexCharts)
-// If vue3-apexcharts is not installed: npm install apexcharts vue3-apexcharts
-import VueApexcharts from 'vue3-apexcharts'
+const toast = reactive({show:false,msg:'',color:'success'})
+const pdfBusy = ref(false)
+const activeSig = ref(null)
+const sheet = ref(null)
+function openSheet(s) { sheet.value = s }
+function fmtRel(dt) { if(!dt)return''; try{const m=Math.floor((Date.now()-new Date(dt).getTime())/60000);if(m<1)return'just now';if(m<60)return m+'m ago';const h=Math.floor(m/60);if(h<24)return h+'h ago';return Math.floor(h/24)+'d ago'}catch{return''} }
 
-// ─── AUTH ──────────────────────────────────────────────────────────────────
-function getAuth() { return JSON.parse(sessionStorage.getItem('AUTH_DATA') ?? 'null') ?? {} }
-const auth = ref(getAuth())
-
-// ─── CONSTANTS ─────────────────────────────────────────────────────────────
-const PERIODS = [
-  { v: 7,  label: '7 days'  },
-  { v: 14, label: '14 days' },
-  { v: 30, label: '30 days' },
-  { v: 90, label: '90 days' },
-]
-const PERIOD_LABELS = { 7:'7 days', 14:'14 days', 30:'30 days', 90:'90 days' }
-
-// ─── CHART THEME ───────────────────────────────────────────────────────────
-// Consistent dark-on-light theme for all ApexCharts instances.
-// These settings are merged into every chart options object.
-const CHART_BASE = {
-  toolbar:    { show: false },
-  animations: { enabled: true, easing: 'easeinout', speed: 500 },
-  fontFamily: 'system-ui, -apple-system, sans-serif',
-  foreColor:  '#546E7A',
-  sparkline:  { enabled: false },
-}
-const GRID_BASE = {
-  borderColor: '#EEF1F7',
-  strokeDashArray: 4,
-  xaxis: { lines: { show: false } },
-  yaxis: { lines: { show: true } },
-}
-const TOOLTIP_BASE = {
-  theme: 'dark',
-  style: { fontSize: '12px' },
-}
-const AXIS_BASE = {
-  axisBorder: { show: false },
-  axisTicks:  { show: false },
-  labels:     { style: { fontSize: '10px', colors: '#90A4AE' } },
-}
-// Brand palette
-const PALETTE = {
-  primary:    '#1A3A5C',
-  symptomatic:'#EF5350',
-  asymptomatic:'#26A69A',
-  referral:   '#FF8F00',
-  fever:      '#F4511E',
-  male:       '#1E88E5',
-  female:     '#E91E63',
-  other:      '#9C27B0',
-  synced:     '#43A047',
-  unsynced:   '#FB8C00',
-  failed:     '#E53935',
-  gradient1:  '#0D47A1',
-  gradient2:  '#1976D2',
+async function onPDF() {
+  pdfBusy.value=true
+  try { const n=await generatePDFReport(); toast.msg='Report: '+n;toast.color='success';toast.show=true }
+  catch(e) { toast.msg='PDF error: '+(e?.message||'Unknown');toast.color='danger';toast.show=true }
+  finally { pdfBusy.value=false }
 }
 
-// ─── STATE ─────────────────────────────────────────────────────────────────
-const activePeriod    = ref(30)
-const periodMenuOpen  = ref(false)
-
-// Server data
-const summary        = ref(null)
-const trendData      = ref(null)
-const heatmapData    = ref(null)
-const funnelData     = ref(null)
-const epiData        = ref(null)
-const deviceData     = ref(null)
-const screenerData   = ref(null)
-const weeklyData     = ref(null)
-const liveData       = ref(null)
-
-// Loading states
-const summaryLoading  = ref(false)
-const trendLoading    = ref(false)
-const heatmapLoading  = ref(false)
-const funnelLoading   = ref(false)
-const epiLoading      = ref(false)
-const deviceLoading   = ref(false)
-const screenerLoading = ref(false)
-const weeklyLoading   = ref(false)
-
-const toast = reactive({ show: false, msg: '', color: 'success' })
-
-let liveTimer = null
-let pollTimer = null
-
-// ─── COMPUTED ───────────────────────────────────────────────────────────────
-const anyLoading = computed(() =>
-  summaryLoading.value || trendLoading.value || epiLoading.value
-)
-
-const deltaClass = computed(() => {
-  const d = summary.value?.today?.vs_yesterday ?? 0
-  return d >= 0 ? 'pd-hero-delta--up' : 'pd-hero-delta--down'
-})
-const deltaArrow = computed(() => (summary.value?.today?.vs_yesterday ?? 0) >= 0 ? '▲ ' : '▼ ')
-
-// ─── CHART: RADIAL BAR (symptomatic rate) ──────────────────────────────────
-const radialSeries = computed(() => {
-  const rate = summary.value?.today?.symptomatic > 0 && summary.value?.today?.total > 0
-    ? parseFloat(((summary.value.today.symptomatic / summary.value.today.total) * 100).toFixed(1))
-    : 0
-  return [rate]
-})
-const radialOpts = computed(() => ({
-  chart: { ...CHART_BASE, type: 'radialBar', height: 160 },
-  plotOptions: {
-    radialBar: {
-      startAngle: -110, endAngle: 110,
-      hollow: { size: '62%' },
-      track: { background: '#E8EDF5', strokeWidth: '100%' },
-      dataLabels: {
-        name: { show: true, color: '#90A4AE', fontSize: '10px', offsetY: 16 },
-        value: {
-          show: true, color: '#1A3A5C', fontSize: '22px', fontWeight: 900,
-          formatter: v => v + '%', offsetY: -6,
-        },
-      },
-    },
-  },
-  fill: {
-    type: 'gradient',
-    gradient: { shade: 'dark', type: 'horizontal', gradientToColors: ['#EF5350'], stops: [0, 100] },
-  },
-  colors: [PALETTE.symptomatic],
-  labels: ['Symptomatic'],
-  tooltip: { enabled: false },
-}))
-
-// ─── CHART: AREA TREND ─────────────────────────────────────────────────────
-const trendSeries = computed(() => {
-  if (!trendData.value?.series?.length) return []
-  const s = trendData.value.series
+// Detail sheet rows
+const summaryRows = computed(() => {
+  const s=sum.value;if(!s)return[];const a=s.all_time||{};const t=s.today||{}
   return [
-    { name: 'Total',       data: s.map(d => ({ x: d.date, y: d.total })) },
-    { name: 'Symptomatic', data: s.map(d => ({ x: d.date, y: d.symptomatic })) },
-    { name: '7-day avg',   data: s.map(d => ({ x: d.date, y: d.avg7 })) },
+    ['Total Screened (All Time)',a.total??0],['Completed',a.completed??0],['Voided',a.voided??0,'sd-dv--dim'],
+    ['Symptomatic',a.symptomatic??0,'sd-dv--r'],['Asymptomatic',a.asymptomatic??0,'sd-dv--g'],
+    ['Symptomatic Rate',`${a.symptomatic_rate??0}%`,(a.symptomatic_rate??0)>=20?'sd-dv--r':''],
+    ['Referrals Created',a.referrals??0],['Male',a.male??0],['Female',a.female??0],
+    ['Today Total',t.total??0],['Today Symptomatic',t.symptomatic??0,'sd-dv--r'],['Today Rate',`${t.symptomatic_rate??0}%`],
+    ['Today Referrals',t.referrals??0],['Fever Today',t.fever_count??0,'sd-dv--a'],['High Fever >=38.5',t.high_fever_count??0,'sd-dv--r'],
+    ['Avg Temp Today',t.avg_temp_c?`${Number(t.avg_temp_c).toFixed(1)}C`:'--'],
+    ['vs Yesterday',`${(t.vs_yesterday??0)>=0?'+':''}${t.vs_yesterday??0}`,(t.vs_yesterday??0)>=0?'sd-dv--g':'sd-dv--r'],
+    ['This Week',s.this_week?.total??0],['This Month',s.this_month?.total??0],
+    ['Unsynced',a.unsynced??0,(a.unsynced??0)>0?'sd-dv--a':''],['Sync Failed',a.sync_failed??0,(a.sync_failed??0)>0?'sd-dv--r':''],
   ]
 })
-const trendOpts = computed(() => ({
-  chart: { ...CHART_BASE, type: 'area', height: 200,
-    zoom: { enabled: false },
-    dropShadow: { enabled: true, top: 4, left: 0, blur: 6, opacity: 0.1 },
-  },
-  dataLabels: { enabled: false },
-  stroke: { curve: 'smooth', width: [2, 1.5, 2], dashArray: [0, 0, 4] },
-  fill: {
-    type: ['gradient', 'gradient', 'none'],
-    gradient: {
-      shadeIntensity: 1, opacityFrom: [0.5, 0.3, 0], opacityTo: [0.05, 0.02, 0],
-      stops: [0, 95, 100],
-    },
-  },
-  colors: [PALETTE.primary, PALETTE.symptomatic, PALETTE.referral],
-  xaxis: {
-    type: 'datetime',
-    ...AXIS_BASE,
-    labels: { ...AXIS_BASE.labels, datetimeFormatter: { day: 'dd MMM' }, rotate: 0 },
-  },
-  yaxis: { ...AXIS_BASE, min: 0, tickAmount: 4, labels: { ...AXIS_BASE.labels } },
-  grid: { ...GRID_BASE, padding: { left: 0, right: 0 } },
-  tooltip: { ...TOOLTIP_BASE, x: { format: 'dd MMM yyyy' } },
-  legend: {
-    position: 'top', horizontalAlign: 'left', fontSize: '11px',
-    markers: { radius: 3 }, offsetY: -4,
-  },
-}))
-
-// ─── CHART: GENDER DONUT ───────────────────────────────────────────────────
-const genderSeries = computed(() => {
-  if (!epiData.value?.by_gender?.length) return []
-  return epiData.value.by_gender.map(g => g.total)
-})
-const genderOpts = computed(() => {
-  const labels = epiData.value?.by_gender?.map(g => g.gender) ?? []
-  const colors = labels.map(g =>
-    g==='MALE'?PALETTE.male : g==='FEMALE'?PALETTE.female : g==='OTHER'?PALETTE.other : '#90A4AE'
-  )
-  return {
-    chart: { ...CHART_BASE, type: 'donut', height: 180 },
-    colors,
-    labels,
-    dataLabels: { enabled: true, style: { fontSize: '10px' } },
-    plotOptions: {
-      pie: {
-        donut: {
-          size: '65%',
-          labels: {
-            show: true,
-            total: { show: true, label: 'Total', fontSize: '10px', color: '#90A4AE',
-              formatter: w => w.globals.seriesTotals.reduce((a,b) => a+b, 0) },
-          },
-        },
-      },
-    },
-    legend: { show: true, position: 'bottom', fontSize: '10px', offsetY: 4 },
-    tooltip: { ...TOOLTIP_BASE },
-  }
-})
-
-// ─── CHART: TEMPERATURE BANDS RADIAL ───────────────────────────────────────
-const tempBandSeries = computed(() => {
-  if (!epiData.value?.temperature?.bands) return []
-  const { hypothermia, normal, low_grade_fever, high_fever } = epiData.value.temperature.bands
-  const total = (hypothermia||0) + (normal||0) + (low_grade_fever||0) + (high_fever||0)
-  if (!total) return [0, 0, 0, 0]
+const referralRows = computed(() => {
+  const rq=sum.value?.referral_queue||{}
   return [
-    parseFloat(((high_fever||0)/total*100).toFixed(1)),
-    parseFloat(((low_grade_fever||0)/total*100).toFixed(1)),
-    parseFloat(((normal||0)/total*100).toFixed(1)),
-    parseFloat(((hypothermia||0)/total*100).toFixed(1)),
+    ['Open',rq.open??0,(rq.open??0)>0?'sd-dv--a':'sd-dv--g'],['In Progress',rq.in_progress??0],['Closed',rq.closed_total??0,'sd-dv--g'],
+    ['Critical Open',rq.critical_open??0,(rq.critical_open??0)>0?'sd-dv--r':''],['High Open',rq.high_open??0,(rq.high_open??0)>0?'sd-dv--a':''],
+    ['Oldest Open (min)',rq.oldest_open_minutes??0,(rq.oldest_open_minutes??0)>30?'sd-dv--r':''],
+    ['Queue Critical',rq.queue_critical?'YES':'NO',rq.queue_critical?'sd-dv--r':'sd-dv--g'],
   ]
 })
-const tempBandOpts = computed(() => ({
-  chart: { ...CHART_BASE, type: 'radialBar', height: 180 },
-  plotOptions: {
-    radialBar: {
-      offsetY: 0,
-      startAngle: -90, endAngle: 270,
-      hollow: { size: '30%' },
-      track: { background: '#EEF1F7' },
-      dataLabels: { name: { fontSize: '10px' }, value: { fontSize: '11px', fontWeight: 700 } },
-    },
-  },
-  colors: ['#E53935', '#FF7043', '#26A69A', '#1E88E5'],
-  labels: ['High Fever', 'Low-Grade', 'Normal', 'Hypo'],
-  legend: { show: true, position: 'bottom', fontSize: '9px', offsetY: 8 },
-  tooltip: { ...TOOLTIP_BASE },
-}))
-
-// ─── CHART: HOURLY BAR ─────────────────────────────────────────────────────
-const hourlySeries = computed(() => {
-  if (!heatmapData.value?.buckets?.length) return []
-  return [{
-    name: 'Screenings',
-    data: heatmapData.value.buckets.map(b => b.total),
-  }]
-})
-const hourlyOpts = computed(() => {
-  const buckets = heatmapData.value?.buckets ?? []
-  // Find peak hour for annotation
-  const maxBucket = buckets.reduce((m,b) => b.total > (m?.total||0) ? b : m, null)
-  return {
-    chart: { ...CHART_BASE, type: 'bar', height: 160 },
-    plotOptions: {
-      bar: {
-        borderRadius: 3,
-        columnWidth: '70%',
-        colors: {
-          ranges: [{
-            from: maxBucket?.total ?? 0,
-            to: (maxBucket?.total ?? 0) + 0.1,
-            color: PALETTE.symptomatic,
-          }],
-        },
-        distributed: false,
-      },
-    },
-    fill: {
-      type: 'gradient',
-      gradient: {
-        type: 'vertical',
-        gradientToColors: ['#42A5F5'],
-        stops: [0, 100],
-        opacityFrom: 1, opacityTo: 0.6,
-      },
-    },
-    colors: [PALETTE.primary],
-    dataLabels: { enabled: false },
-    xaxis: {
-      ...AXIS_BASE,
-      categories: buckets.map(b => b.label),
-      labels: {
-        ...AXIS_BASE.labels,
-        rotate: 0,
-        formatter: v => v?.split(':')[0] ?? v,
-      },
-    },
-    yaxis: { ...AXIS_BASE, show: false },
-    grid: { ...GRID_BASE, yaxis: { lines: { show: false } } },
-    tooltip: { ...TOOLTIP_BASE, y: { formatter: v => v + ' screenings' } },
-    annotations: maxBucket ? {
-      xaxis: [{
-        x: maxBucket.label,
-        strokeDashArray: 0,
-        borderColor: PALETTE.symptomatic,
-        label: {
-          text: 'PEAK',
-          style: { color: '#fff', background: PALETTE.symptomatic, fontSize: '9px', padding: { left: 4, right: 4, top: 2, bottom: 2 } },
-        },
-      }],
-    } : {},
-  }
-})
-
-// ─── CHART: FUNNEL (isFunnel bar) ──────────────────────────────────────────
-const funnelSeries = computed(() => {
-  if (!funnelData.value?.funnel?.length) return []
-  return [{
-    name: 'Count',
-    data: funnelData.value.funnel.map(f => f.count),
-  }]
-})
-const funnelOpts = computed(() => {
-  const stages = funnelData.value?.funnel ?? []
-  return {
-    chart: { ...CHART_BASE, type: 'bar', height: 200 },
-    plotOptions: {
-      bar: {
-        borderRadius: 4,
-        horizontal: true,
-        isFunnel: true,
-        distributed: true,
-        dataLabels: { position: 'bottom' },
-      },
-    },
-    colors: ['#1A3A5C','#1565C0','#EF5350','#FF8F00','#43A047'],
-    dataLabels: {
-      enabled: true,
-      formatter: (val, { dataPointIndex }) => {
-        const s = stages[dataPointIndex]
-        return s ? `${s.stage}: ${val} (${s.rate}%)` : val
-      },
-      style: { fontSize: '10px', colors: ['#fff'] },
-      dropShadow: { enabled: false },
-    },
-    xaxis: {
-      ...AXIS_BASE,
-      categories: stages.map(s => s.stage),
-      labels: { show: false },
-    },
-    yaxis: {
-      ...AXIS_BASE,
-      labels: { ...AXIS_BASE.labels, style: { ...AXIS_BASE.labels.style, fontSize: '9px' } },
-    },
-    grid: { show: false },
-    legend: { show: false },
-    tooltip: { ...TOOLTIP_BASE,
-      y: { formatter: (val, { dataPointIndex }) => {
-        const s = stages[dataPointIndex]
-        return s ? `${val} travelers (${s.rate}%)` : val
-      }},
-    },
-  }
-})
-
-// ─── CHART: WEEKDAY SYMPTOMATIC RATE ───────────────────────────────────────
-const weekdaySeries = computed(() => {
-  if (!epiData.value?.symp_by_weekday?.length) return []
+const tempRows = computed(() => {
+  const t=epi.value?.temperature;if(!t)return[]
   return [
-    { name: 'Total',      data: epiData.value.symp_by_weekday.map(d => d.total) },
-    { name: 'Symptomatic', data: epiData.value.symp_by_weekday.map(d => d.symptomatic) },
+    ['Recordings',t.count_with_temp??0],['Average',t.avg_c!=null?`${Number(t.avg_c).toFixed(1)}C`:'--'],
+    ['Min',t.min_c!=null?`${t.min_c}C`:'--'],['Max',t.max_c!=null?`${t.max_c}C`:'--',(t.max_c??0)>=38.5?'sd-dv--r':''],
+    ['High Fever >=38.5',t.bands?.high_fever??0,(t.bands?.high_fever??0)>0?'sd-dv--r':''],
+    ['Low-Grade 37.5-38.5',t.bands?.low_grade_fever??0,(t.bands?.low_grade_fever??0)>0?'sd-dv--a':''],
+    ['Normal 36-37.5',t.bands?.normal??0,'sd-dv--g'],['Hypothermia <36',t.bands?.hypothermia??0],
   ]
 })
-const weekdayOpts = computed(() => {
-  const days = epiData.value?.symp_by_weekday ?? []
-  return {
-    chart: { ...CHART_BASE, type: 'bar', height: 160, stacked: false },
-    plotOptions: { bar: { borderRadius: 3, columnWidth: '50%' } },
-    colors: [PALETTE.primary, PALETTE.symptomatic],
-    dataLabels: { enabled: false },
-    xaxis: {
-      ...AXIS_BASE,
-      categories: days.map(d => d.label),
-    },
-    yaxis: { ...AXIS_BASE, show: false },
-    grid: { ...GRID_BASE, yaxis: { lines: { show: false } } },
-    tooltip: {
-      ...TOOLTIP_BASE,
-      y: {
-        formatter: (val, { dataPointIndex, seriesIndex }) => {
-          const d = days[dataPointIndex]
-          if (seriesIndex === 1 && d) return `${val} (${d.symp_rate}%)`
-          return val
-        },
-      },
-    },
-    legend: { show: true, position: 'top', horizontalAlign: 'left', fontSize: '10px', offsetY: -4 },
-  }
-})
-
-// ─── CHART: DEVICE SYNC HEALTH ─────────────────────────────────────────────
-const syncHealthSeries = computed(() => {
-  if (!deviceData.value?.devices?.length) return []
-  const devices = deviceData.value.devices.slice(0, 5)
+const secRows = computed(() => {
+  const sc=fun.value?.secondary_cases;if(!sc)return[]
   return [
-    { name: 'Synced',  data: devices.map(d => d.synced) },
-    { name: 'Pending', data: devices.map(d => d.unsynced) },
-    { name: 'Failed',  data: devices.map(d => d.failed) },
+    ['Total',sc.total??0],['Open',sc.open??0,(sc.open??0)>0?'sd-dv--a':''],['In Progress',sc.in_progress??0],
+    ['Dispositioned',sc.dispositioned??0],['Closed',sc.closed??0,'sd-dv--g'],
+    ['Critical Risk',sc.risk_critical??0,(sc.risk_critical??0)>0?'sd-dv--r':''],['High Risk',sc.risk_high??0,(sc.risk_high??0)>0?'sd-dv--a':''],
+    ['Released',sc.released??0],['Quarantined',sc.quarantined??0,(sc.quarantined??0)>0?'sd-dv--a':''],
+    ['Isolated',sc.isolated??0,(sc.isolated??0)>0?'sd-dv--r':''],['Referred',sc.referred??0],
+    ['Avg Duration',sc.avg_case_duration_minutes!=null?`${sc.avg_case_duration_minutes} min`:'--'],
   ]
-})
-const syncHealthOpts = computed(() => {
-  const devices = deviceData.value?.devices?.slice(0, 5) ?? []
-  return {
-    chart: { ...CHART_BASE, type: 'bar', height: 120, stacked: true, stackType: '100%' },
-    plotOptions: { bar: { horizontal: true, borderRadius: 2 } },
-    colors: [PALETTE.synced, PALETTE.unsynced, PALETTE.failed],
-    dataLabels: { enabled: false },
-    xaxis: { ...AXIS_BASE, categories: devices.map(d => d.device_id.slice(-8)), labels: { show: false } },
-    yaxis: { ...AXIS_BASE, labels: { ...AXIS_BASE.labels, style: { ...AXIS_BASE.labels.style, fontSize: '9px' } } },
-    grid: { show: false },
-    legend: { show: true, position: 'top', fontSize: '10px', offsetY: -4 },
-    tooltip: {
-      ...TOOLTIP_BASE,
-      y: { formatter: v => v + ' records' },
-    },
-  }
-})
-
-// ─── CHART: SCREENER BAR ───────────────────────────────────────────────────
-const screenerBarSeries = computed(() => {
-  if (!screenerData.value?.screeners?.length) return []
-  const top = screenerData.value.screeners.slice(0, 6)
-  return [
-    { name: 'Total',      data: top.map(s => s.total) },
-    { name: 'Symptomatic', data: top.map(s => s.symptomatic) },
-  ]
-})
-const screenerBarOpts = computed(() => {
-  const top = screenerData.value?.screeners?.slice(0, 6) ?? []
-  const names = top.map(s => (s.full_name ?? s.username ?? 'Unknown').split(' ')[0])
-  return {
-    chart: { ...CHART_BASE, type: 'bar', height: 180 },
-    plotOptions: { bar: { borderRadius: 3, columnWidth: '55%' } },
-    colors: [PALETTE.primary, PALETTE.symptomatic],
-    dataLabels: { enabled: false },
-    xaxis: { ...AXIS_BASE, categories: names },
-    yaxis: { ...AXIS_BASE, show: false },
-    grid: { ...GRID_BASE, yaxis: { lines: { show: false } } },
-    legend: { show: true, position: 'top', horizontalAlign: 'left', fontSize: '10px', offsetY: -4 },
-    tooltip: {
-      ...TOOLTIP_BASE,
-      y: { formatter: (val, { dataPointIndex, seriesIndex }) => {
-        const s = top[dataPointIndex]
-        if (seriesIndex === 0) return `${val} (symp rate: ${s?.symptomatic_rate ?? 0}%)`
-        return val
-      }},
-    },
-  }
-})
-
-// ─── API FETCHER ────────────────────────────────────────────────────────────
-async function api(path, extraParams = {}) {
-  const userId = auth.value?.id
-  if (!userId) return null
-  const p = new URLSearchParams({ user_id: userId, days: activePeriod.value, ...extraParams })
-  const ctrl = new AbortController()
-  const tid  = setTimeout(() => ctrl.abort(), APP.SYNC_TIMEOUT_MS)
-  try {
-    const res = await fetch(`${window.SERVER_URL}${path}?${p}`, {
-      headers: { Accept: 'application/json' }, signal: ctrl.signal,
-    })
-    clearTimeout(tid)
-    if (!res.ok) return null
-    const j = await res.json()
-    return j.success ? j.data : null
-  } catch { clearTimeout(tid); return null }
-}
-
-// ─── LOAD FUNCTIONS ─────────────────────────────────────────────────────────
-async function loadSummary() {
-  summaryLoading.value = true
-  summary.value = await api('/dashboard/summary')
-  summaryLoading.value = false
-}
-
-async function loadTrend() {
-  trendLoading.value = true
-  trendData.value = await api('/dashboard/trend')
-  trendLoading.value = false
-}
-
-async function loadHeatmap() {
-  heatmapLoading.value = true
-  heatmapData.value = await api('/dashboard/heatmap', { group_by: 'hour' })
-  heatmapLoading.value = false
-}
-
-async function loadFunnel() {
-  funnelLoading.value = true
-  funnelData.value = await api('/dashboard/funnel')
-  funnelLoading.value = false
-}
-
-async function loadEpi() {
-  epiLoading.value = true
-  epiData.value = await api('/dashboard/epi')
-  epiLoading.value = false
-}
-
-async function loadDeviceHealth() {
-  deviceLoading.value = true
-  deviceData.value = await api('/dashboard/device-health')
-  deviceLoading.value = false
-}
-
-async function loadScreenerReport() {
-  screenerLoading.value = true
-  screenerData.value = await api('/dashboard/screener-report')
-  screenerLoading.value = false
-}
-
-async function loadWeekly() {
-  weeklyLoading.value = true
-  weeklyData.value = await api('/dashboard/weekly-report')
-  weeklyLoading.value = false
-}
-
-async function loadLive() {
-  const d = await api('/dashboard/live')
-  if (d) liveData.value = d
-}
-
-/**
- * Load all dashboard data.
- * Prioritises visible data first (summary + trend), then defers secondary
- * panels (epi, funnel, device, screener) so the hero loads fast.
- */
-async function loadAll() {
-  auth.value = getAuth()
-  periodMenuOpen.value = false
-
-  // Priority 1: hero data (renders immediately visible content)
-  await Promise.all([loadSummary(), loadTrend()])
-
-  // Priority 2: above-fold charts  
-  await Promise.all([loadEpi(), loadHeatmap()])
-
-  // Priority 3: below-fold panels
-  Promise.all([loadFunnel(), loadDeviceHealth(), loadScreenerReport(), loadWeekly()])
-    .catch(() => {})
-}
-
-// ─── PERIOD SELECTOR ────────────────────────────────────────────────────────
-function setPeriod(v) {
-  activePeriod.value   = v
-  periodMenuOpen.value = false
-  loadAll()
-}
-
-// ─── PULL TO REFRESH ────────────────────────────────────────────────────────
-async function onPullRefresh(ev) {
-  await loadAll()
-  ev.target.complete()
-}
-
-// ─── LIVE POLLING ───────────────────────────────────────────────────────────
-function startLivePolling() {
-  loadLive()
-  liveTimer = setInterval(() => loadLive(), 30_000)
-}
-function stopLivePolling() {
-  clearInterval(liveTimer)
-}
-
-// ─── LIFECYCLE ──────────────────────────────────────────────────────────────
-onMounted(() => {
-  loadAll()
-  startLivePolling()
-})
-
-onIonViewWillEnter(() => {
-  auth.value = getAuth()
-  loadSummary()
-  loadLive()
-})
-
-onUnmounted(() => {
-  stopLivePolling()
-  clearInterval(pollTimer)
 })
 </script>
 
 <style scoped>
-/* ═══════════════════════════════════════════════════════════════════════
-   PRIMARY SCREENING DASHBOARD · Namespace: pd-*
-   Design: Navy command centre — premium enterprise analytics, mobile-first.
-   Light background, deep navy cards, gradient chart fills.
-   Light theme only. No dark mode.
-═══════════════════════════════════════════════════════════════════════ */
+*{box-sizing:border-box}
+.sd-tb{--background:linear-gradient(135deg,#001D3D,#003566,#003F88);--color:#fff;--padding-start:6px;--padding-end:6px;--min-height:48px}
+.sd-tb-title{display:flex;flex-direction:column;margin-left:2px}
+.sd-tb-eye{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:1.2px;color:rgba(255,255,255,.35)}
+.sd-tb-h1{font-size:17px;font-weight:800;color:#fff}
+.sd-live{display:flex;align-items:center;gap:4px;padding:3px 8px;border-radius:99px;font-size:10px;font-weight:700;border:1px solid rgba(255,255,255,.1);color:rgba(255,255,255,.4);margin-right:3px}
+.sd-live--on{color:#90EE90;border-color:rgba(144,238,144,.2)}
+.sd-live-dot{width:6px;height:6px;border-radius:50%;background:currentColor}
+.sd-live-n{font-size:14px;font-weight:900}.sd-live-l{font-size:9px}
+.sd-pdf-btn{padding:3px 9px;border-radius:5px;border:1px solid rgba(255,255,255,.15);background:rgba(255,255,255,.08);color:#fff;font-size:10px;font-weight:800;cursor:pointer;margin-right:3px}
+.sd-rb{--color:rgba(255,255,255,.6);font-size:18px}
 
-/* ── HEADER ──────────────────────────────────────────────────────────── */
-.pd-toolbar {
-  --background: #0D253F;
-  --color: #fff;
-  --padding-start: 8px;
-  --padding-end: 8px;
-  --min-height: 52px;
-}
-.pd-menu-btn { --color: rgba(255,255,255,.75); }
-.pd-title-block { display:flex; flex-direction:column; margin-left:4px; }
-.pd-eyebrow { font-size:9px; font-weight:700; text-transform:uppercase; letter-spacing:1.4px; color:rgba(255,255,255,.45); line-height:1; }
-.pd-title   { font-size:16px; font-weight:800; color:#fff; line-height:1.2; }
+/* FILTERS */
+.sd-fb{display:flex;align-items:center;background:#002F6C;padding:4px 6px;gap:4px}
+.sd-fs{flex:1;display:flex;gap:3px;overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch}.sd-fs::-webkit-scrollbar{display:none}
+.sd-fp{padding:5px 10px;border-radius:99px;border:none;background:rgba(255,255,255,.07);color:rgba(255,255,255,.55);font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap;flex-shrink:0}
+.sd-fp--on{background:rgba(255,255,255,.2);color:#fff}
+.sd-ft{padding:4px 8px;border-radius:5px;border:1px solid rgba(255,255,255,.12);background:transparent;color:rgba(255,255,255,.5);font-size:12px;font-weight:700;cursor:pointer;flex-shrink:0}
+.sd-ft--on{color:#fff;background:rgba(255,255,255,.1)}
+.sd-af{background:#001D3D;padding:8px 10px 6px}
+.sd-ar{display:flex;align-items:center;gap:4px;margin-bottom:6px;flex-wrap:wrap}
+.sd-al{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.3px;color:rgba(255,255,255,.35);min-width:40px;flex-shrink:0}
+.sd-ap{display:flex;gap:2px;overflow-x:auto;scrollbar-width:none;flex:1;-webkit-overflow-scrolling:touch}.sd-ap::-webkit-scrollbar{display:none}
+.sd-pill{padding:4px 9px;border-radius:99px;border:1px solid rgba(255,255,255,.1);background:transparent;color:rgba(255,255,255,.45);font-size:10px;font-weight:700;cursor:pointer;white-space:nowrap;flex-shrink:0}
+.sd-pill--on{background:rgba(255,255,255,.18);color:#fff;border-color:rgba(255,255,255,.25)}
+.sd-ai{padding:4px 6px;border:1px solid rgba(255,255,255,.12);border-radius:5px;background:rgba(255,255,255,.05);color:#fff;font-size:11px;outline:none;flex:1;min-width:0}
+.sd-ai--h{max-width:44%}
+.sd-aa{display:flex;gap:6px;padding-top:2px}
+.sd-apply{flex:1;padding:6px;border-radius:5px;border:none;background:#1565C0;color:#fff;font-size:11px;font-weight:700;cursor:pointer}
+.sd-clear{padding:6px 10px;border-radius:5px;border:1px solid rgba(255,255,255,.15);background:transparent;color:rgba(255,255,255,.5);font-size:11px;font-weight:700;cursor:pointer}
+.sd-sl-enter-active,.sd-sl-leave-active{transition:max-height .2s,opacity .2s;overflow:hidden}
+.sd-sl-enter-from,.sd-sl-leave-to{max-height:0;opacity:0}
+.sd-sl-enter-to,.sd-sl-leave-from{max-height:250px;opacity:1}
 
-/* Live pill */
-.pd-live-pill {
-  display:inline-flex; align-items:center; gap:4px;
-  padding:4px 9px; border-radius:9999px; margin-right:4px;
-  font-size:11px; font-weight:700;
-  border:1px solid rgba(255,255,255,.2);
-  background:rgba(255,255,255,.08); color:rgba(255,255,255,.6);
-  transition:all .3s;
-}
-.pd-live-pill--on { background:rgba(67,160,71,.25); color:#A5D6A7; border-color:rgba(67,160,71,.4); }
-.pd-live-dot {
-  width:6px; height:6px; border-radius:50%; background:currentColor;
-  animation:pd-pulse 2s ease-in-out infinite;
-}
-@keyframes pd-pulse { 0%,100%{opacity:1} 50%{opacity:.35} }
-.pd-live-total { font-size:13px; font-weight:900; }
-.pd-live-lbl   { font-size:9px; font-weight:600; text-transform:uppercase; letter-spacing:.5px; }
+/* CONTENT */
+.sd-c{--background:#F0F4FA}
+.sd-offline{padding:8px 12px;background:#FFF3E0;border-bottom:1px solid #FFB74D;font-size:11px;color:#BF360C;text-align:center;font-weight:600}
+.sd-ld{display:flex;flex-direction:column;align-items:center;gap:10px;padding:50px 20px;color:#607D8B}
+.sd-b{padding:0 8px}
 
-/* Period button */
-.pd-period-btn {
-  display:inline-flex; align-items:center; gap:4px;
-  padding:4px 8px; border-radius:7px; margin-right:4px;
-  border:1px solid rgba(255,255,255,.2);
-  background:rgba(255,255,255,.08); color:rgba(255,255,255,.8);
-  font-size:11px; font-weight:700; cursor:pointer; white-space:nowrap;
-}
-.pd-period-btn ion-icon { font-size:13px; }
-.pd-refresh-btn { --color:rgba(255,255,255,.7); }
+/* HERO */
+.sd-hero{display:flex;align-items:center;gap:10px;padding:12px 4px 6px;cursor:pointer}
+.sd-ring-w{position:relative;width:78px;height:78px;flex-shrink:0}
+.sd-ring-w svg{width:100%;height:100%}
+.sd-ring-anim{transition:stroke-dasharray .6s ease}
+.sd-ring-ctr{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center}
+.sd-ring-pct{font-size:20px;font-weight:900;color:#1A3A5C}.sd-ring-pct small{font-size:11px;color:#90A4AE}
+.sd-ring-lbl{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:#90A4AE}
+.sd-hero-r{flex:1;min-width:0}
+.sd-hero-big{font-size:28px;font-weight:900;color:#1A3A5C;line-height:1}
+.sd-hero-sub{font-size:11px;font-weight:600;color:#607D8B;margin-top:2px}
+.sd-hero-row{display:flex;gap:8px;margin-top:6px;flex-wrap:wrap}
+.sd-hm{display:flex;flex-direction:column}
+.sd-hm-v{font-size:15px;font-weight:900;color:#1A3A5C;line-height:1}
+.sd-hm-l{font-size:9px;font-weight:600;color:#90A4AE;margin-top:1px}
+.sd-hm--up .sd-hm-v{color:#2E7D32}.sd-hm--dn .sd-hm-v{color:#C62828}
 
-/* Period dropdown */
-.pd-period-menu {
-  position:absolute; top:100%; right:8px; z-index:999;
-  background:#1A3A5C; border-radius:10px;
-  box-shadow:0 8px 24px rgba(0,0,0,.35);
-  overflow:hidden; min-width:140px;
-  animation:pd-drop .15s ease;
-}
-@keyframes pd-drop { from{opacity:0;transform:translateY(-6px)} to{opacity:1;transform:translateY(0)} }
-.pd-period-opt {
-  width:100%; padding:12px 16px; text-align:left;
-  border:none; background:transparent; color:rgba(255,255,255,.75);
-  font-size:13px; font-weight:600; cursor:pointer;
-  display:flex; align-items:center; justify-content:space-between;
-  transition:background .1s;
-}
-.pd-period-opt:hover, .pd-period-opt--on { background:rgba(255,255,255,.12); color:#fff; }
-.pd-period-opt ion-icon { font-size:14px; color:#42A5F5; }
+/* QUICK STATS */
+.sd-qs{display:flex;gap:4px;overflow-x:auto;scrollbar-width:none;padding:2px 0 8px;-webkit-overflow-scrolling:touch}.sd-qs::-webkit-scrollbar{display:none}
+.sd-q{flex:0 0 auto;min-width:76px;padding:8px 10px;background:#fff;border-radius:10px;border:1px solid #E8EDF5;display:flex;flex-direction:column;gap:2px;cursor:pointer}
+.sd-q--r{border-color:rgba(229,57,53,.18);background:#FFF5F5}.sd-q--a{border-color:rgba(255,152,0,.18);background:#FFF8E1}
+.sd-qn{font-size:18px;font-weight:900;color:#1A3A5C;line-height:1}
+.sd-q--r .sd-qn{color:#C62828}.sd-q--a .sd-qn{color:#E65100}
+.sd-ql{font-size:9px;font-weight:700;color:#90A4AE;text-transform:uppercase;letter-spacing:.2px}
 
-/* ── CONTENT ──────────────────────────────────────────────────────────── */
-.pd-content { --background:#F0F4F8; }
+/* SIGNALS */
+.sd-sh{display:flex;align-items:center;gap:6px;padding:4px 4px 6px}
+.sd-sh-dot{width:8px;height:8px;border-radius:50%;background:#E53935}
+.sd-sh-t{font-size:13px;font-weight:800;color:#1A3A5C}
+.sd-sh-b{padding:1px 6px;border-radius:99px;font-size:10px;font-weight:800;background:#FFEBEE;color:#C62828}
+.sd-sigs{display:flex;flex-direction:column;gap:4px;margin-bottom:8px}
+.sd-sig{display:flex;align-items:flex-start;gap:6px;padding:8px 10px;border-radius:8px;border:1px solid;background:#fff;cursor:pointer}
+.sd-sig--critical{border-color:rgba(229,57,53,.18);background:#FFF5F5}
+.sd-sig--high{border-color:rgba(255,152,0,.15);background:#FFF8E1}
+.sd-sig--medium{border-color:#E8EDF5;background:#FAFBFD}
+.sd-sig-i{width:20px;height:20px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:900;color:#fff;flex-shrink:0;margin-top:1px}
+.sd-sig--critical .sd-sig-i{background:#E53935}.sd-sig--high .sd-sig-i{background:#F57C00}.sd-sig--medium .sd-sig-i{background:#BDBDBD}
+.sd-sig-b{flex:1;min-width:0}
+.sd-sig-c{display:block;font-size:9px;font-weight:800;text-transform:uppercase;letter-spacing:.4px;color:#90A4AE}
+.sd-sig-t{display:block;font-size:12px;font-weight:700;color:#1A3A5C;margin-top:1px}
+.sd-sig-d{display:block;font-size:10px;color:#546E7A;margin-top:2px;line-height:1.4}
 
-.pd-global-loading {
-  display:flex; flex-direction:column; align-items:center; justify-content:center;
-  height:60vh; gap:14px; color:#607D8B; font-size:14px;
-}
-.pd-main-spinner { --color:#1A3A5C; width:36px; height:36px; }
+/* CARD */
+.sd-card{background:#fff;border-radius:10px;border:1px solid #E8EDF5;margin-bottom:8px;overflow:hidden;box-shadow:0 1px 2px rgba(0,0,0,.03)}
+.sd-ch{display:flex;align-items:baseline;gap:4px;padding:10px 12px 4px;flex-wrap:wrap}
+.sd-ct{font-size:14px;font-weight:800;color:#1A3A5C}
+.sd-cs{font-size:11px;color:#90A4AE;font-weight:600}
+.sd-cbadge{padding:1px 6px;border-radius:99px;font-size:9px;font-weight:800;background:#FFEBEE;color:#C62828;margin-left:auto}
+.sd-cbadge--w{background:#FFF3E0;color:#E65100}
 
-.pd-body { padding:0 0 16px; }
+/* TREND */
+.sd-tw{padding:2px 12px 8px}.sd-tsvg{width:100%;height:auto;display:block}
+.sd-txl{display:flex;justify-content:space-between;padding:3px 4px 0}.sd-txl span{font-size:9px;color:#B0BEC5}
+.sd-tleg{display:flex;gap:10px;padding:5px 4px 0}
+.sd-tl{font-size:10px;font-weight:700;color:#607D8B;display:flex;align-items:center;gap:4px}
+.sd-tl::before{content:'';width:8px;height:2px;border-radius:1px}
+.sd-tl--t::before{background:#1565C0}.sd-tl--s::before{background:#E53935}
 
-/* ── KPI HERO STRIP ──────────────────────────────────────────────────── */
-.pd-kpi-strip {
-  background:linear-gradient(180deg, #0D253F 0%, #1A3A5C 60%, #F0F4F8 60%);
-  padding:0 12px 0;
-}
+/* BARS */
+.sd-bars{padding:4px 12px 10px;display:flex;flex-direction:column;gap:4px}
+.sd-bar{display:flex;align-items:center;gap:4px}
+.sd-bl{font-size:11px;font-weight:700;color:#546E7A;min-width:14px;text-align:center}
+.sd-bl--w{min-width:55px;text-transform:capitalize;font-size:10px}
+.sd-bt{flex:1;height:8px;background:#E8EDF5;border-radius:4px;overflow:hidden}
+.sd-bf{height:100%;border-radius:3px;transition:width .4s}
+.sd-bf--male{background:#1E88E5}.sd-bf--female{background:#E91E63}.sd-bf--other{background:#9C27B0}.sd-bf--unknown{background:#607D8B}.sd-bf--syn{background:#7E57C2}
+.sd-bv{font-size:11px;font-weight:700;color:#546E7A;min-width:22px;text-align:right}
 
-.pd-hero-card {
-  background:rgba(255,255,255,.06);
-  border:1px solid rgba(255,255,255,.12);
-  border-radius:14px;
-  display:flex; align-items:center;
-  padding:6px 16px 6px 0;
-  margin-bottom:10px;
-  backdrop-filter:blur(8px);
-}
-.pd-hero-chart { flex-shrink:0; width:160px; }
-.pd-hero-meta  { flex:1; padding-left:4px; }
-.pd-hero-val   { display:block; font-size:36px; font-weight:900; color:#fff; line-height:1; }
-.pd-hero-lbl   { display:block; font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:.6px; color:rgba(255,255,255,.5); margin-top:2px; }
-.pd-hero-delta { display:block; font-size:12px; font-weight:700; margin-top:6px; }
-.pd-hero-delta--up   { color:#A5D6A7; }
-.pd-hero-delta--down { color:#EF9A9A; }
+/* TEMP STACK */
+.sd-ts{padding:4px 12px 10px;cursor:pointer}
+.sd-tsb{display:flex;height:10px;border-radius:5px;overflow:hidden;gap:1px}
+.sd-tss{min-width:2px;transition:flex .4s}
+.sd-tsl{display:flex;flex-wrap:wrap;gap:2px 8px;padding:5px 0 0}
+.sd-tsi{display:flex;align-items:center;gap:4px;font-size:10px;font-weight:600;color:#546E7A}
+.sd-tsd{width:5px;height:5px;border-radius:50%;flex-shrink:0}
 
-/* KPI card scroll row */
-.pd-kpi-row {
-  display:flex; gap:8px; overflow-x:auto; scrollbar-width:none;
-  padding-bottom:14px;
-}
-.pd-kpi-row::-webkit-scrollbar { display:none; }
+/* HOURS */
+.sd-hrs{display:flex;gap:1px;align-items:flex-end;height:60px;padding:4px 6px 4px}
+.sd-hc{flex:1;display:flex;flex-direction:column;align-items:center;gap:1px;min-width:0}
+.sd-hc--odd .sd-hl{visibility:hidden}
+.sd-hbw{width:100%;height:40px;display:flex;align-items:flex-end}
+.sd-hb{width:100%;background:#C5CAE9;border-radius:1px 1px 0 0;transition:height .3s;min-height:1px}
+.sd-hb--pk{background:#1565C0}
+.sd-hl{font-size:8px;color:#B0BEC5}
 
-.pd-kpi-card {
-  flex:0 0 80px; background:#fff; border-radius:12px;
-  padding:10px 8px; text-align:center;
-  box-shadow:0 2px 8px rgba(0,0,0,.1);
-  border:1px solid rgba(255,255,255,.5);
-  display:flex; flex-direction:column; align-items:center; gap:3px;
-  transition:transform .1s;
-}
-.pd-kpi-card:active { transform:scale(.97); }
-.pd-kpi-ico { font-size:18px; line-height:1; }
-.pd-kpi-num { font-size:20px; font-weight:900; color:#1A3A5C; line-height:1; }
-.pd-kpi-sub { font-size:8px; font-weight:700; text-transform:uppercase; letter-spacing:.4px; color:#90A4AE; text-align:center; }
+/* FUNNEL */
+.sd-fun{padding:4px 12px 2px;display:flex;flex-direction:column;gap:3px}
+.sd-fn{position:relative;height:34px;border-radius:6px;overflow:hidden;background:#F5F7FA}
+.sd-fnb{position:absolute;inset:0;border-radius:5px;background:#E3F2FD;transition:width .5s}
+.sd-fnf{position:relative;display:flex;align-items:center;gap:4px;padding:0 8px;height:100%;z-index:1}
+.sd-fnn{font-size:14px;font-weight:900;color:#1A3A5C}
+.sd-fnl{font-size:10px;font-weight:600;color:#546E7A;text-transform:capitalize;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sd-fnp{font-size:10px;font-weight:800;color:#90A4AE}
+.sd-fk{display:flex;gap:3px;padding:4px 12px 10px}
+.sd-fki{flex:1;padding:5px 3px;background:#F5F7FA;border-radius:4px;text-align:center}
+.sd-fkv{display:block;font-size:14px;font-weight:900;color:#1A3A5C}
+.sd-fkl{display:block;font-size:9px;font-weight:600;color:#90A4AE;text-transform:uppercase;margin-top:1px}
+.sd-fkv--w{color:#E65100}.sd-fkv--d{color:#C62828}
 
-.pd-kpi--sym   { border-top:3px solid #EF5350; }
-.pd-kpi--ref   { border-top:3px solid #FF8F00; }
-.pd-kpi--fever { border-top:3px solid #F4511E; }
-.pd-kpi--queue { border-top:3px solid #1565C0; }
-.pd-kpi--alert { border-top:3px solid #7B1FA2; }
-.pd-kpi--week  { border-top:3px solid #43A047; }
-.pd-kpi--critical { border-top-color:#E53935; box-shadow:0 2px 8px rgba(229,57,53,.25); }
-.pd-kpi--critical .pd-kpi-num { color:#E53935; }
+/* GRID */
+.sd-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;margin:0 12px 10px;background:#E8EDF5;border-radius:6px;overflow:hidden}
+.sd-gc{display:flex;flex-direction:column;align-items:center;padding:10px 4px;background:#fff;gap:2px}
+.sd-gn{font-size:17px;font-weight:900;color:#1A3A5C;line-height:1}
+.sd-gl{font-size:9px;font-weight:700;color:#90A4AE;text-transform:uppercase;letter-spacing:.2px;text-align:center}
+.sd-gn--rd{color:#C62828!important}.sd-gn--am{color:#E65100!important}.sd-gn--or{color:#F57C00!important}.sd-gn--gr{color:#2E7D32!important}.sd-gn--bl{color:#1565C0!important}
 
-/* ── SHARED CARD ─────────────────────────────────────────────────────── */
-.pd-card {
-  background:#fff; border-radius:14px; margin:10px 12px 0;
-  box-shadow:0 1px 6px rgba(0,0,0,.07), 0 0 0 1px rgba(0,0,0,.04);
-  overflow:hidden;
-}
-.pd-card-hdr {
-  display:flex; align-items:baseline; gap:8px;
-  padding:13px 14px 6px;
-}
-.pd-card-title {
-  font-size:13px; font-weight:800; color:#1A3A5C;
-}
-.pd-card-sub   {
-  font-size:10px; color:#90A4AE; margin-left:auto;
-}
-.pd-chart-wrap { padding:0 4px 8px; }
+/* DEVICES */
+.sd-dev{display:flex;align-items:center;gap:6px;padding:5px 12px;border-top:1px solid #F0F4FA}.sd-dev:first-of-type{border-top:none}
+.sd-dev-l{flex:1;min-width:0}
+.sd-dev-id{display:block;font-size:11px;font-weight:700;color:#1A3A5C;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sd-dev-m{display:block;font-size:10px;color:#90A4AE}
+.sd-dev-s{font-size:9px;font-weight:800;padding:2px 6px;border-radius:3px;text-transform:uppercase}
+.sd-dev-s--healthy{background:#E8F5E9;color:#2E7D32}.sd-dev-s--warning{background:#FFF3E0;color:#E65100}.sd-dev-s--critical{background:#FFEBEE;color:#C62828}
+.sd-dev-s--silent,.sd-dev-s--pending,.sd-dev-s--unknown{background:#F5F5F5;color:#607D8B}
 
-/* Row with two half-cards */
-.pd-row-2 { display:flex; gap:10px; margin:10px 12px 0; }
-.pd-row-2 .pd-card { flex:1; margin:0; min-width:0; }
+/* OFFICERS */
+.sd-off{display:flex;align-items:center;gap:4px;padding:3px 12px}
+.sd-off-n{font-size:11px;font-weight:600;color:#546E7A;min-width:60px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sd-off-bw{flex:1;height:8px;background:#E8EDF5;border-radius:4px;overflow:hidden}
+.sd-off-b{height:100%;background:#1E88E5;border-radius:4px;transition:width .4s}
+.sd-off-v{font-size:11px;font-weight:800;color:#546E7A;min-width:20px;text-align:right}
 
-/* Skeleton loader */
-.pd-chart-skeleton {
-  background:linear-gradient(90deg, #EEF1F7 25%, #F5F7FA 50%, #EEF1F7 75%);
-  background-size:200% 100%;
-  animation:pd-shimmer 1.4s ease-in-out infinite;
-  border-radius:8px; margin:8px 14px;
-  display:flex; align-items:center; justify-content:center;
-}
-@keyframes pd-shimmer { 0%{background-position:200% 0} 100%{background-position:-200% 0} }
-.pd-sk-spin { --color:#B0BEC5; width:24px; height:24px; }
+/* MODALS — full-screen with IonContent for native scroll */
+.sd-modal::part(content){border-radius:14px 14px 0 0}
+.sd-st{--background:#fff;--border-width:0 0 1px 0;--border-color:#E8EDF5;--min-height:36px}
+.sd-handle{width:32px;height:3px;border-radius:2px;background:#DDE3EA;margin:0 10px}
+.sd-sc{--background:#fff}
+.sd-sp{padding:14px 16px 0}
+.sd-mt{font-size:16px;font-weight:800;color:#1A3A5C;margin:0 0 12px}
+.sd-dg{display:flex;flex-direction:column}
+.sd-dr{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid #F0F4FA}
+.sd-dr:last-child{border-bottom:none}
+.sd-dk{font-size:12px;font-weight:600;color:#546E7A}
+.sd-dv{font-size:13px;font-weight:800;color:#1A3A5C}
+.sd-dv--r{color:#C62828!important}.sd-dv--a{color:#E65100!important}.sd-dv--g{color:#2E7D32!important}.sd-dv--dim{color:#90A4AE!important}
 
-/* ── FUNNEL KPIs ──────────────────────────────────────────────────────── */
-.pd-funnel-kpis {
-  display:flex; border-top:1px solid #EEF1F7; padding:10px 14px;
-}
-.pd-fkpi { flex:1; text-align:center; }
-.pd-fkpi:not(:last-child) { border-right:1px solid #EEF1F7; }
-.pd-fkpi-val { display:block; font-size:18px; font-weight:900; color:#1A3A5C; line-height:1; }
-.pd-fkpi-lbl { display:block; font-size:9px; font-weight:700; text-transform:uppercase; letter-spacing:.4px; color:#90A4AE; margin-top:3px; }
-.pd-fkpi--warn   { color:#FF8F00; }
-.pd-fkpi--danger { color:#E53935; }
+/* SIGNAL DETAIL */
+.sd-sig-hdr{padding:12px;border-radius:8px;margin-bottom:12px}
+.sd-sig-hdr--critical{background:#FFEBEE}.sd-sig-hdr--high{background:#FFF3E0}.sd-sig-hdr--medium{background:#F5F5F5}
+.sd-sig-hc{display:block;font-size:7px;font-weight:800;text-transform:uppercase;letter-spacing:.6px;color:#90A4AE;margin-bottom:4px}
+.sd-sig-ht{display:block;font-size:15px;font-weight:800;color:#1A3A5C;line-height:1.3}
+.sd-sig-desc{font-size:13px;color:#37474F;line-height:1.55;margin:0 0 14px}
+.sd-sig-act{background:#E3F2FD;border-radius:8px;padding:12px;margin-bottom:14px}
+.sd-sig-al{display:block;font-size:7px;font-weight:800;text-transform:uppercase;letter-spacing:.6px;color:#1565C0;margin-bottom:5px}
+.sd-sig-at{font-size:12px;font-weight:600;color:#0D47A1;line-height:1.5;margin:0}
 
-/* ── WEEKLY REPORT ────────────────────────────────────────────────────── */
-.pd-weekly-grid {
-  display:grid; grid-template-columns:repeat(3,1fr);
-  gap:1px; background:#EEF1F7;
-  margin:0 14px 0; border-radius:8px; overflow:hidden;
-}
-.pd-wg-item {
-  background:#fff; padding:10px 8px; text-align:center;
-  display:flex; flex-direction:column; gap:3px;
-}
-.pd-wg-val { font-size:18px; font-weight:900; color:#1A3A5C; line-height:1; }
-.pd-wg-lbl { font-size:8px; font-weight:700; text-transform:uppercase; letter-spacing:.4px; color:#90A4AE; }
-.pd-wg--sym   .pd-wg-val { color:#EF5350; }
-.pd-wg--fever .pd-wg-val { color:#F4511E; }
-.pd-wg--up    .pd-wg-val { color:#43A047; }
-.pd-wg--down  .pd-wg-val { color:#E53935; }
-
-/* Gender mini stacked bar */
-.pd-gender-mini { padding:10px 14px; border-top:1px solid #EEF1F7; }
-.pd-gm-bar { height:10px; border-radius:5px; overflow:hidden; display:flex; gap:1px; margin-bottom:6px; }
-.pd-gm-seg { min-width:4px; border-radius:3px; }
-.pd-gm--m  { background:#1E88E5; }
-.pd-gm--f  { background:#E91E63; }
-.pd-gm--o  { background:#9C27B0; }
-.pd-gm-legend { display:flex; gap:12px; flex-wrap:wrap; }
-.pd-gml { font-size:10px; font-weight:700; padding-left:10px; position:relative; }
-.pd-gml::before { content:''; position:absolute; left:0; top:50%; transform:translateY(-50%); width:7px; height:7px; border-radius:50%; }
-.pd-gml--m::before { background:#1E88E5; }
-.pd-gml--f::before { background:#E91E63; }
-.pd-gml--o::before { background:#9C27B0; }
-
-/* ── DEVICE HEALTH ───────────────────────────────────────────────────── */
-.pd-at-risk-badge {
-  padding:2px 8px; border-radius:9999px; font-size:9px; font-weight:800;
-  background:#FFEBEE; color:#C62828; border:1px solid rgba(198,40,40,.3);
-  margin-left:auto;
-}
-.pd-device-list { border-top:1px solid #EEF1F7; }
-.pd-device-row {
-  display:flex; align-items:center; gap:10px;
-  padding:9px 14px; border-bottom:1px solid #F5F7FA;
-}
-.pd-device-row:last-child { border-bottom:none; }
-.pd-device-info { flex:1; min-width:0; }
-.pd-device-id {
-  display:block; font-size:11px; font-weight:700; color:#1A3A5C;
-  white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-family:monospace;
-}
-.pd-device-meta { display:block; font-size:10px; color:#90A4AE; }
-.pd-device-right { display:flex; flex-direction:column; align-items:flex-end; gap:2px; }
-.pd-device-status { font-size:9px; font-weight:800; padding:2px 6px; border-radius:4px; }
-.pd-ds--healthy  { background:#E8F5E9; color:#2E7D32; }
-.pd-ds--pending  { background:#FFF3E0; color:#E65100; }
-.pd-ds--warning  { background:#FFEBEE; color:#C62828; }
-.pd-ds--critical { background:#B71C1C; color:#fff; }
-.pd-ds--silent   { background:#E8EAF6; color:#283593; }
-.pd-ds--unknown  { background:#F5F5F5; color:#616161; }
-.pd-device-unsynced { font-size:9px; font-weight:700; color:#E65100; }
-
-.pd-device-row--critical .pd-device-id { color:#C62828; }
-
-/* ── RESPONSIVE ─────────────────────────────────────────────────────── */
-@media (min-width: 600px) {
-  .pd-body { max-width:720px; margin:0 auto; }
-  .pd-kpi-strip { border-radius:0; }
-}
-@media (min-width: 960px) {
-  .pd-body { max-width:1080px; }
-}
+@media(min-width:500px){.sd-b{max-width:480px;margin:0 auto}.sd-hc--odd .sd-hl{visibility:visible}}
 </style>

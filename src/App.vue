@@ -381,6 +381,7 @@ import {
   libraryOutline,
   settingsOutline,
   logOutOutline,
+  bookOutline,
   // ── login modal icons ──
   alertCircleOutline,
   lockClosedOutline,
@@ -388,6 +389,32 @@ import {
   eyeOffOutline,
   personOutline,
 } from 'ionicons/icons'
+
+// ─── Live alert counts from IDB + server (wired to menu badges) ────────────
+import { dbCountIndex, dbGetByIndex, STORE } from '@/services/poeDB'
+const liveOpenAlerts = ref(0)
+async function refreshLiveAlertCount() {
+  try {
+    const all = await dbGetByIndex(STORE.ALERTS, 'status', 'OPEN').catch(() => [])
+    // Scope to user's jurisdiction — same logic as the server
+    const a = JSON.parse(sessionStorage.getItem('AUTH_DATA') ?? 'null') ?? {}
+    const role = a?.role_key || ''
+    const inScope = (x) => {
+      if (!x || x.deleted_at) return false
+      if (['POE_PRIMARY','POE_SECONDARY','POE_DATA_OFFICER','POE_ADMIN','SCREENER'].includes(role)) {
+        return !a.poe_code || x.poe_code === a.poe_code
+      }
+      if (role === 'DISTRICT_SUPERVISOR') return !a.district_code || x.district_code === a.district_code
+      if (role === 'PHEOC_OFFICER')       return !a.pheoc_code   || x.pheoc_code === a.pheoc_code
+      return !a.country_code || x.country_code === a.country_code
+    }
+    liveOpenAlerts.value = all.filter(inScope).length
+  } catch { liveOpenAlerts.value = 0 }
+}
+// Refresh every 15s + on window focus
+setInterval(refreshLiveAlertCount, 15_000)
+window.addEventListener('focus', refreshLiveAlertCount)
+refreshLiveAlertCount()
 
 // ─── App constants ────────────────────────────────────────────────────────────
 const APP_VERSION  = '0.0.1'
@@ -482,6 +509,7 @@ async function tryOfflineLogin(login: string, password: string): Promise<Record<
 type RoleKey =
   | 'POE_PRIMARY' | 'POE_SECONDARY' | 'POE_DATA_OFFICER'
   | 'POE_ADMIN' | 'DISTRICT_SUPERVISOR' | 'PHEOC_OFFICER' | 'NATIONAL_ADMIN'
+  | 'SCREENER'
 
 const ROLE_LABELS: Record<RoleKey, string> = {
   POE_PRIMARY:         'Primary Officer',
@@ -491,6 +519,7 @@ const ROLE_LABELS: Record<RoleKey, string> = {
   DISTRICT_SUPERVISOR: 'District Supervisor',
   PHEOC_OFFICER:       'PHEOC Officer',
   NATIONAL_ADMIN:      'National Admin',
+  SCREENER:            'Screener',
 }
 
 // ─── Client-side permission derivation ───────────────────────────────────────
@@ -516,8 +545,12 @@ function derivePermissions(roleKey: string | null): Record<string, boolean> {
     POE_SECONDARY:       { can_do_secondary_screening: true, can_view_all_poe_data: true, can_close_notifications: true, can_acknowledge_alerts: true },
     POE_DATA_OFFICER:    { can_do_primary_screening: true,  can_do_secondary_screening: true, can_submit_aggregated: true, can_view_all_poe_data: true, can_acknowledge_alerts: true, can_close_notifications: true },
     POE_ADMIN:           { can_do_primary_screening: true,  can_do_secondary_screening: true, can_submit_aggregated: true, can_manage_users: true, can_view_all_poe_data: true, can_manage_poes: true, can_acknowledge_alerts: true, can_close_notifications: true },
-    DISTRICT_SUPERVISOR: { can_submit_aggregated: true,     can_view_all_poe_data: true,  can_view_district_data: true, can_manage_users: true, can_acknowledge_alerts: true, can_close_notifications: true },
-    PHEOC_OFFICER:       { can_submit_aggregated: true,     can_view_all_poe_data: true,  can_view_district_data: true, can_view_province_code: true, can_manage_users: true, can_acknowledge_alerts: true, can_close_notifications: true },
+    // DISTRICT_SUPERVISOR: full operational capability within their district.
+    // Any POE in their district is fair game — screening, secondary cases,
+    // aggregated data, manage users + POEs, acknowledge/close.
+    DISTRICT_SUPERVISOR: { can_do_primary_screening: true, can_do_secondary_screening: true, can_submit_aggregated: true, can_view_all_poe_data: true, can_view_district_data: true, can_manage_users: true, can_manage_poes: true, can_acknowledge_alerts: true, can_close_notifications: true },
+    // PHEOC_OFFICER: full operational capability within their PHEOC / province.
+    PHEOC_OFFICER:       { can_do_primary_screening: true, can_do_secondary_screening: true, can_submit_aggregated: true, can_view_all_poe_data: true, can_view_district_data: true, can_view_province_data: true, can_manage_users: true, can_manage_poes: true, can_acknowledge_alerts: true, can_close_notifications: true },
     NATIONAL_ADMIN:      { can_do_primary_screening: true,  can_do_secondary_screening: true, can_submit_aggregated: true, can_manage_users: true, can_view_all_poe_data: true, can_view_district_data: true, can_view_province_data: true, can_view_national_data: true, can_manage_poes: true, can_acknowledge_alerts: true, can_close_notifications: true },
     SCREENER:            { can_do_primary_screening: true,  can_view_all_poe_data: true,  can_close_notifications: true },
   }
@@ -574,14 +607,19 @@ const syncIcon  = { synced: cloudDoneOutline, unsynced: cloudUploadOutline, sync
 // ─── RBAC — derived from real role_key after login ────────────────────────────
 const r = computed(() => authData.value?.role_key ?? '')
 const inRoles = (...roles: RoleKey[]) => roles.includes(r.value as RoleKey)
+// Supervisor roles (NATIONAL_ADMIN, PHEOC_OFFICER, DISTRICT_SUPERVISOR) are
+// implicitly added to every POE-level capability — within their own scope.
+// Geographic enforcement happens at the controller / data layer; the menu
+// simply exposes the view.
+const SUPERVISOR_ROLES = ['DISTRICT_SUPERVISOR', 'PHEOC_OFFICER', 'NATIONAL_ADMIN'] as const
 const can = computed(() => ({
-  primary:      inRoles('POE_PRIMARY', 'POE_SECONDARY', 'POE_ADMIN'),
-  queue:        inRoles('POE_SECONDARY', 'POE_ADMIN', 'DISTRICT_SUPERVISOR', 'PHEOC_OFFICER', 'NATIONAL_ADMIN'),
-  secondary:    inRoles('POE_SECONDARY', 'POE_ADMIN', 'DISTRICT_SUPERVISOR', 'PHEOC_OFFICER', 'NATIONAL_ADMIN'),
-  alerts:       inRoles('POE_SECONDARY', 'POE_ADMIN', 'DISTRICT_SUPERVISOR', 'PHEOC_OFFICER', 'NATIONAL_ADMIN'),
-  aggregated:   inRoles('POE_DATA_OFFICER', 'POE_ADMIN', 'DISTRICT_SUPERVISOR', 'PHEOC_OFFICER', 'NATIONAL_ADMIN'),
-  surveillance: inRoles('DISTRICT_SUPERVISOR', 'PHEOC_OFFICER', 'NATIONAL_ADMIN'),
-  admin:        inRoles('POE_ADMIN', 'DISTRICT_SUPERVISOR', 'PHEOC_OFFICER', 'NATIONAL_ADMIN'),
+  primary:      inRoles('POE_PRIMARY', 'POE_SECONDARY', 'POE_ADMIN', 'SCREENER', ...SUPERVISOR_ROLES),
+  queue:        inRoles('POE_SECONDARY', 'POE_ADMIN', ...SUPERVISOR_ROLES),
+  secondary:    inRoles('POE_SECONDARY', 'POE_ADMIN', ...SUPERVISOR_ROLES),
+  alerts:       inRoles('POE_SECONDARY', 'POE_ADMIN', ...SUPERVISOR_ROLES),
+  aggregated:   inRoles('POE_DATA_OFFICER', 'POE_ADMIN', ...SUPERVISOR_ROLES),
+  surveillance: inRoles(...SUPERVISOR_ROLES),
+  admin:        inRoles('POE_ADMIN', ...SUPERVISOR_ROLES),
   system:       r.value === 'NATIONAL_ADMIN',
 }))
 
@@ -678,6 +716,19 @@ const menuGroups = computed((): MenuGroup[] => [
     },
   ],
 },
+// ── POE MANAGEMENT ───────────────────────────────────────────────────────────
+{
+  id: 'diesease-management', title: 'DISEASE MANAGEMENT', show: true /* DEV: auth guard disabled */,
+  items: [
+    {
+      id: 'diesease-management', label: 'Tracked Diesease', icon: mapOutline,
+      sub: 'Manage and view tracked diseases in the systems',
+      route: '/DiseaseInteligence',
+      tag: 'core', tagVariant: 'primary',
+      ariaLabel: 'Manage and view tracked diseases in the systems',
+    },
+  ],
+},
 
 // ── USER MANAGEMENT ──────────────────────────────────────────────────────────
 {
@@ -735,11 +786,11 @@ const menuGroups = computed((): MenuGroup[] => [
       ariaLabel: 'Primary screening records — full list with search, filters and sync state',
     },
     {
-      // Analytics dashboard: trend, funnel, epi indicators, device health.
-      id: 'primary-dashboard', label: 'Primary Screening Analytics', icon: barChartOutline,
-      sub: 'Trends · funnel · epi indicators · devices',
-      route: '/primary-screening/dashboard',
-      ariaLabel: 'Primary screening analytics dashboard — trends, referral funnel and device health',
+      // Intelligence dashboard: primary + secondary screening analytics, surveillance signals, AI analysis.
+      id: 'screening-dashboard', label: 'Screening Intelligence', icon: barChartOutline,
+      sub: 'Surveillance · trends · referral funnel · AI signals',
+      route: '/screening-dashboard',
+      ariaLabel: 'Screening intelligence dashboard — primary and secondary surveillance analytics',
     },
   ],
 },
@@ -816,8 +867,19 @@ const menuGroups = computed((): MenuGroup[] => [
         sub: 'Open · acknowledge · escalate · route',
         iconClass: 'mn__icon--alert',
         route: '/alerts',
-        badge: () => mockCounts.openAlerts, badgeVariant: 'danger',
-        ariaLabel: `Active alerts — ${mockCounts.openAlerts} open`,
+        badge: () => liveOpenAlerts.value, badgeVariant: 'danger',
+        ariaLabel: 'Active alerts',
+      },
+      {
+        id: 'alerts-intel', label: 'Intelligence', icon: pulseOutline,
+        sub: '7-1-7 compliance · AI insights · follow-ups',
+        iconClass: 'mn__icon--alert',
+        route: '/alerts/intelligence',
+      },
+      {
+        id: 'alerts-matrix', label: 'WHO Matrix', icon: bookOutline,
+        sub: 'IHR Tier 1 · Tier 2 · Annex 2 · 7-1-7 reference',
+        route: '/alerts/matrix',
       },
       {
         id: 'alerts-history', label: 'Alert History', icon: shieldCheckmarkOutline,
@@ -836,15 +898,30 @@ const menuGroups = computed((): MenuGroup[] => [
     id: 'aggregated', title: 'AGGREGATED DATA', show: true  /* DEV: auth guard disabled */,
     items: [
       {
-        id: 'agg-new', label: 'New Report', icon: cloudUploadOutline,
-        sub: 'Submit counts · period totals · offline',
+        id: 'agg-hub', label: 'Reports', icon: cloudUploadOutline,
+        sub: 'Browse & submit · daily · weekly · ad-hoc',
         iconClass: 'mn__icon--create',
-        route: '/aggregated-data/new',
+        route: '/aggregated-data',
       },
       {
         id: 'agg-history', label: 'Submission History', icon: barChartOutline,
         sub: 'Past reports · details · sync state',
         route: '/aggregated-data/history',
+      },
+      {
+        id: 'agg-wizard', label: 'Create Report Template', icon: addCircleOutline,
+        sub: '5-step wizard · publish to all POEs',
+        route: '/admin/aggregated-wizard',
+      },
+      {
+        id: 'agg-template', label: 'Template Settings', icon: cogOutline,
+        sub: 'Edit columns · retire · version',
+        route: '/admin/aggregated-templates',
+      },
+      {
+        id: 'agg-contacts', label: 'Notification Contacts', icon: peopleOutline,
+        sub: 'POE escalation · email recipients',
+        route: '/admin/poe-contacts',
       },
     ],
   },
@@ -2057,5 +2134,262 @@ ion-menu { --width: var(--mn-width); }
 /* ═══════════════════════════════════════════════════════════
    RESPONSIVE
 ═══════════════════════════════════════════════════════════ */
-@media (min-width: 600px) { ion-menu { --width: 308px; } }
+@media (min-width: 600px) { ion-menu { --width: 316px; } }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   ✧ PREMIUM SIDEBAR UPGRADE — 2026-04-21 v3 ✧
+   World-class visual pass. Non-breaking override layer that elevates the
+   existing .ip, .mn, .mf class structure without touching the template.
+═══════════════════════════════════════════════════════════════════════ */
+
+/* Deep aurora background with animated mesh */
+ion-menu { --width: 316px; --background: linear-gradient(180deg, #F7FAFF 0%, #EEF2FF 100%); }
+.menu-content {
+  --background: transparent;
+  background:
+    radial-gradient(1200px 500px at -10% -10%, rgba(59,130,246,.08), transparent 60%),
+    radial-gradient(800px 500px at 110% 110%, rgba(147,51,234,.06), transparent 60%),
+    linear-gradient(180deg, #F8FAFC 0%, #F1F5F9 100%);
+}
+
+/* Identity panel — frosted glass with subtle gradient accent */
+.ip {
+  background: linear-gradient(135deg, rgba(255,255,255,.9) 0%, rgba(240,244,250,.8) 100%) !important;
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border-bottom: 1px solid rgba(148,163,184,.12);
+  box-shadow: 0 1px 0 rgba(255,255,255,.8) inset, 0 10px 30px -10px rgba(15,23,42,.08);
+}
+.ip__bar {
+  height: 3px !important;
+  background: linear-gradient(90deg, #1E40AF 0%, #3B82F6 35%, #8B5CF6 65%, #EC4899 100%) !important;
+  background-size: 200% 100%;
+  animation: ip-shimmer 7s linear infinite;
+  box-shadow: 0 2px 14px rgba(30,64,175,.45) !important;
+}
+@keyframes ip-shimmer {
+  0%   { background-position: 0% 50% }
+  100% { background-position: 200% 50% }
+}
+
+/* Avatar — premium frame with animated ring */
+.ip__av-wrap {
+  position: relative;
+  padding: 3px;
+  background: linear-gradient(135deg, #3B82F6, #8B5CF6 50%, #EC4899);
+  border-radius: 50%;
+  box-shadow: 0 4px 18px rgba(59,130,246,.35), 0 0 0 1px rgba(255,255,255,.4);
+}
+.ip__av-wrap::before {
+  content: ''; position: absolute; inset: -2px;
+  border-radius: 50%;
+  background: conic-gradient(from 0deg, #3B82F6, #8B5CF6, #EC4899, #F59E0B, #3B82F6);
+  filter: blur(8px); opacity: .55; z-index: -1;
+  animation: ip-ring 6s linear infinite;
+}
+@keyframes ip-ring { to { transform: rotate(360deg) } }
+.ip__av {
+  background: linear-gradient(135deg, #0F172A, #1E293B) !important;
+  color: #fff !important;
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.1);
+}
+.ip__initials { font-weight: 800 !important; letter-spacing: .5px }
+
+/* Name + role pill */
+.ip__name { letter-spacing: -.3px; font-weight: 800 !important; color: #0F172A !important }
+.ip__role {
+  letter-spacing: .6px !important;
+  box-shadow: 0 2px 8px rgba(0,0,0,.12), inset 0 1px 0 rgba(255,255,255,.2) !important;
+  padding: 2px 8px !important;
+}
+.ip__scope { color: #64748B !important; font-weight: 600 }
+
+/* Sync chip — elevate */
+.ip__sync {
+  background: linear-gradient(135deg, rgba(255,255,255,.9), rgba(241,245,249,.85)) !important;
+  border: 1px solid rgba(148,163,184,.2) !important;
+  box-shadow: 0 2px 8px rgba(15,23,42,.06), 0 0 0 1px rgba(255,255,255,.4) inset;
+  border-radius: 10px !important;
+  transition: all .15s ease !important;
+}
+.ip__sync:hover { transform: translateY(-1px); box-shadow: 0 6px 16px rgba(15,23,42,.1) !important; background: rgba(255,255,255,.98) !important }
+
+/* Group titles — elegant section headers with gradient bar */
+.mn__gt {
+  position: relative;
+  font-size: 10px !important;
+  letter-spacing: 1.4px !important;
+  font-weight: 900 !important;
+  color: #475569 !important;
+  text-transform: uppercase;
+  padding: 14px 18px 8px !important;
+  margin: 0;
+}
+.mn__gt::after {
+  content: '';
+  display: block;
+  height: 1px;
+  margin-top: 8px;
+  background: linear-gradient(90deg, rgba(148,163,184,.45) 0%, rgba(148,163,184,.05) 100%);
+}
+
+/* Menu items — premium surface with smooth hover + active gradient */
+.mn__item {
+  position: relative;
+  border-radius: 10px !important;
+  margin: 2px 10px !important;
+  padding: 11px 12px !important;
+  gap: 12px !important;
+  background: transparent !important;
+  transition: background .15s ease, transform .1s ease, box-shadow .15s ease !important;
+  overflow: hidden;
+}
+.mn__item::before {
+  content: '';
+  position: absolute; left: 0; top: 50%; transform: translateY(-50%);
+  width: 3px; height: 0;
+  background: linear-gradient(180deg, #3B82F6, #8B5CF6);
+  border-radius: 0 3px 3px 0;
+  transition: height .2s ease;
+}
+.mn__item:hover {
+  background: linear-gradient(90deg, rgba(59,130,246,.06), rgba(59,130,246,.02)) !important;
+  transform: translateX(2px);
+}
+.mn__item:hover::before { height: 70% }
+.mn__item:active { transform: scale(.99) }
+
+/* Active state — prominent with gradient + glow */
+.mn__item--active {
+  background: linear-gradient(135deg, rgba(59,130,246,.16), rgba(139,92,246,.08)) !important;
+  box-shadow:
+    0 0 0 1px rgba(59,130,246,.18),
+    0 6px 18px -8px rgba(59,130,246,.35),
+    inset 0 1px 0 rgba(255,255,255,.5) !important;
+  transform: translateX(2px);
+}
+.mn__item--active::before { height: 85% }
+
+/* Icon bubble — premium elevated surface */
+.mn__icon {
+  width: 34px !important;
+  height: 34px !important;
+  border-radius: 10px !important;
+  background: linear-gradient(135deg, #fff 0%, #F1F5F9 100%) !important;
+  border: 1px solid rgba(148,163,184,.18) !important;
+  box-shadow: 0 2px 6px rgba(15,23,42,.06) !important;
+  color: #1E40AF !important;
+  font-size: 17px !important;
+  transition: all .2s ease !important;
+  flex-shrink: 0;
+}
+.mn__item:hover .mn__icon {
+  transform: scale(1.04) rotate(-3deg);
+  box-shadow: 0 4px 12px rgba(30,64,175,.2) !important;
+  background: linear-gradient(135deg, #EFF6FF, #DBEAFE) !important;
+}
+.mn__item--active .mn__icon {
+  background: linear-gradient(135deg, #3B82F6, #1E40AF) !important;
+  color: #fff !important;
+  border-color: transparent !important;
+  box-shadow: 0 4px 14px rgba(30,64,175,.4) !important;
+  transform: scale(1.03);
+}
+
+/* Icon accent variants */
+.mn__icon--create  { background: linear-gradient(135deg, #ECFDF5, #D1FAE5) !important; color: #047857 !important }
+.mn__icon--alert   { background: linear-gradient(135deg, #FEF2F2, #FEE2E2) !important; color: #991B1B !important }
+.mn__icon--screen  { background: linear-gradient(135deg, #EFF6FF, #DBEAFE) !important; color: #1E40AF !important }
+.mn__icon--queue   { background: linear-gradient(135deg, #FEF3C7, #FDE68A) !important; color: #854D0E !important }
+.mn__icon--data    { background: linear-gradient(135deg, #FAF5FF, #EDE9FE) !important; color: #6B21A8 !important }
+
+/* Label typography */
+.mn__label {
+  font-size: 13px !important;
+  font-weight: 700 !important;
+  color: #0F172A !important;
+  letter-spacing: -.1px;
+}
+.mn__sub {
+  font-size: 10.5px !important;
+  color: #64748B !important;
+  font-weight: 500 !important;
+  margin-top: 2px !important;
+}
+.mn__item--active .mn__label { color: #1E3A8A !important; font-weight: 800 !important }
+.mn__item--active .mn__sub   { color: #3B82F6 !important }
+
+/* Live badges — premium pulse */
+.mn__badge {
+  font-size: 10px !important;
+  font-weight: 900 !important;
+  padding: 2px 8px !important;
+  border-radius: 99px !important;
+  min-width: 22px;
+  text-align: center;
+  box-shadow: 0 2px 8px rgba(0,0,0,.15), inset 0 1px 0 rgba(255,255,255,.3);
+  letter-spacing: .3px;
+}
+.mn__badge--primary  { background: linear-gradient(135deg, #3B82F6, #1E40AF) !important; color: #fff !important }
+.mn__badge--warning  { background: linear-gradient(135deg, #F59E0B, #D97706) !important; color: #fff !important }
+.mn__badge--danger   {
+  background: linear-gradient(135deg, #EF4444, #DC2626) !important;
+  color: #fff !important;
+  animation: mn-badge-pulse 2s ease-in-out infinite;
+}
+@keyframes mn-badge-pulse {
+  0%, 100% { box-shadow: 0 2px 8px rgba(220,38,38,.4), 0 0 0 0 rgba(220,38,38,.5), inset 0 1px 0 rgba(255,255,255,.3) }
+  50%      { box-shadow: 0 2px 8px rgba(220,38,38,.4), 0 0 0 8px rgba(220,38,38,0),   inset 0 1px 0 rgba(255,255,255,.3) }
+}
+
+/* Tag chip */
+.mn__tag {
+  font-size: 9px !important;
+  font-weight: 800 !important;
+  padding: 2px 7px !important;
+  border-radius: 4px !important;
+  letter-spacing: .4px !important;
+}
+
+/* Danger item (logout) */
+.mn__item--danger .mn__icon {
+  background: linear-gradient(135deg, #FEF2F2, #FEE2E2) !important;
+  color: #DC2626 !important;
+}
+.mn__item--danger:hover {
+  background: linear-gradient(90deg, rgba(220,38,38,.08), rgba(220,38,38,.02)) !important;
+}
+.mn__item--danger:hover::before { background: linear-gradient(180deg, #EF4444, #DC2626) }
+
+/* Footer — subtle glass strip */
+.mf {
+  margin-top: auto;
+  padding: 14px 18px 16px !important;
+  background: linear-gradient(180deg, rgba(241,245,249,0) 0%, rgba(241,245,249,.8) 50%) !important;
+  border-top: 1px solid rgba(148,163,184,.15);
+}
+.mf__div { background: linear-gradient(90deg, transparent, rgba(148,163,184,.3), transparent) !important; height: 1px !important }
+.mf__k { font-size: 9.5px !important; color: #64748B !important; font-weight: 700 !important; letter-spacing: .5px !important }
+.mf__v { font-size: 10.5px !important; color: #1E293B !important; font-weight: 700 !important }
+.mf__mono { font-family: ui-monospace, Menlo, monospace !important }
+
+/* Whole-sidebar entrance */
+.ip, .mn__group, .mf { animation: mn-slide-in .4s ease-out both }
+.mn__group:nth-child(1) { animation-delay: .05s }
+.mn__group:nth-child(2) { animation-delay: .1s }
+.mn__group:nth-child(3) { animation-delay: .15s }
+.mn__group:nth-child(4) { animation-delay: .2s }
+.mn__group:nth-child(5) { animation-delay: .25s }
+.mn__group:nth-child(6) { animation-delay: .3s }
+@keyframes mn-slide-in {
+  from { opacity: 0; transform: translateX(-6px) }
+  to   { opacity: 1; transform: translateX(0) }
+}
+
+/* Scrollbar */
+.menu-content::part(scroll)::-webkit-scrollbar { width: 6px }
+.menu-content::part(scroll)::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, rgba(59,130,246,.35), rgba(139,92,246,.35));
+  border-radius: 3px;
+}
 </style>

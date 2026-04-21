@@ -1,3293 +1,2062 @@
 <template>
-  <IonPage>
+  <IonPage class="ps-page">
 
-    <!-- ══════════════════════════════════════════════════════════════════════
-         HEADER — Blue gradient, session stats, POE context, sync/queue badges
-    ══════════════════════════════════════════════════════════════════════ -->
-    <IonHeader class="ps-header" :translucent="false">
-      <div class="ps-hdr-pattern" aria-hidden="true" />
-
-      <!-- Top bar: back + title + upload button -->
-      <div class="ps-hdr-top">
-        <div class="ps-hdr-left">
-          <button class="ps-back-btn" type="button" aria-label="Back to menu" @click="goBack">
-            <svg viewBox="0 0 18 18" fill="none" stroke="rgba(255,255,255,0.85)" stroke-width="2.2" stroke-linecap="round">
-              <polyline points="11 4 6 9 11 14"/>
+    <!-- ═══════════════════════════════════════════════════════════
+         HEADER — DARK ZONE — compact command strip
+    ═══════════════════════════════════════════════════════════════ -->
+    <IonHeader :translucent="false" class="ps-hdr">
+      <IonToolbar class="ps-toolbar">
+        <IonButtons slot="start">
+          <IonBackButton default-href="/home" text="" style="--color:rgba(255,255,255,.8);" aria-label="Back"/>
+        </IonButtons>
+        <IonTitle class="ps-toolbar-title">
+          <div class="ps-title-line">
+            <span class="ps-title-poe">{{ auth?.poe_code || '—' }}</span>
+            <span class="ps-title-sep">·</span>
+            <span class="ps-title-label">Primary Screening</span>
+          </div>
+        </IonTitle>
+        <IonButtons slot="end" style="padding-right:10px;gap:6px;">
+          <div class="ps-net" :class="isOnline ? 'ps-net--on' : 'ps-net--off'"/>
+          <button class="ps-hbtn" :class="openReferrals > 0 && 'ps-hbtn--alert'"
+            @click="setTab('queue')" aria-label="Queue">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
+              <rect x="2" y="3" width="12" height="10" rx="1.5"/>
+              <line x1="5" y1="7" x2="11" y2="7"/><line x1="5" y1="10" x2="8.5" y2="10"/>
             </svg>
+            <span v-if="openReferrals > 0" class="ps-hbadge">{{ openReferrals > 9 ? '9+' : openReferrals }}</span>
           </button>
-          <div class="ps-title-block">
-            <span class="ps-eyebrow">{{ auth.poe_code ?? 'POE' }} · Primary</span>
-            <div class="ps-page-title">Rapid Screening</div>
+          <button class="ps-hbtn" :class="syncing && 'ps-hbtn--spin'"
+            :disabled="syncing" @click="manualSync" aria-label="Sync">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"
+              stroke-linecap="round" :class="syncing && 'ps-spin'">
+              <path d="M13 7A6 6 0 1 1 7 2"/><polyline points="13 2 13 7 8 7"/>
+            </svg>
+            <span v-if="pendingCount > 0 && !syncing" class="ps-hbadge ps-hbadge--amber">{{ pendingCount }}</span>
+          </button>
+        </IonButtons>
+      </IonToolbar>
+
+      <!-- Stats strip + tabs inside IonHeader, outside IonToolbar -->
+      <div class="ps-below-toolbar">
+        <!-- Compact 5-stat strip -->
+        <div class="ps-stats">
+          <div class="ps-s" title="Screened today">
+            <span class="ps-s-n">{{ todayCount }}</span>
+            <span class="ps-s-l">Today</span>
+          </div>
+          <div class="ps-sdiv"/>
+          <div class="ps-s">
+            <span class="ps-s-n ps-s-n--red">{{ symptomCount }}</span>
+            <span class="ps-s-l">Sympt.</span>
+          </div>
+          <div class="ps-sdiv"/>
+          <div class="ps-s">
+            <span class="ps-s-n ps-s-n--green">{{ syncedCount }}</span>
+            <span class="ps-s-l">Synced</span>
+          </div>
+          <div class="ps-sdiv"/>
+          <div class="ps-s">
+            <span class="ps-s-n" :class="pendingCount > 0 ? 'ps-s-n--amber' : 'ps-s-n--green'">{{ pendingCount }}</span>
+            <span class="ps-s-l">Pending</span>
+          </div>
+          <div class="ps-sdiv"/>
+          <div class="ps-s">
+            <span class="ps-s-n" :class="openReferrals > 0 ? 'ps-s-n--red' : 'ps-s-n--green'">{{ openReferrals }}</span>
+            <span class="ps-s-l">Queue</span>
           </div>
         </div>
-
-        <div class="ps-hdr-actions">
-          <!-- Referral queue badge button -->
-          <button
-            class="ps-hact"
-            type="button"
-            :class="{ 'ps-hact--alert': openReferrals > 0 }"
-            aria-label="View referral queue"
-            @click="showTab = 'queue'"
-          >
-            <svg viewBox="0 0 15 15" fill="none" stroke="rgba(255,255,255,0.9)" stroke-width="1.7" stroke-linecap="round">
-              <rect x="1" y="3" width="13" height="10" rx="2"/>
-              <line x1="4" y1="7" x2="11" y2="7"/><line x1="4" y1="10" x2="8" y2="10"/>
-            </svg>
-            <span class="ps-hact-txt">Queue</span>
-            <span v-if="openReferrals > 0" class="ps-hbadge" aria-label="{{ openReferrals }} open referrals">{{ openReferrals }}</span>
-          </button>
-
-          <!-- Upload / sync button -->
-          <button
-            class="ps-hact"
-            type="button"
-            :class="{ 'ps-hact--syncing': syncEngineRunning }"
-            :disabled="syncEngineRunning"
-            aria-label="Upload pending records"
-            @click="manualSync"
-          >
-            <svg v-if="!syncEngineRunning" viewBox="0 0 15 15" fill="none" stroke="rgba(255,255,255,0.9)" stroke-width="1.7" stroke-linecap="round">
-              <polyline points="11 5 7 1 3 5"/><line x1="7" y1="1" x2="7" y2="11"/><path d="M1 13h13"/>
-            </svg>
-            <svg v-else viewBox="0 0 15 15" fill="none" stroke="rgba(255,255,255,0.9)" stroke-width="1.7" stroke-linecap="round" class="ps-spin">
-              <path d="M13 7A6 6 0 1 1 7 1"/>
-            </svg>
-            <span class="ps-hact-txt">{{ syncEngineRunning ? 'Syncing…' : 'Upload' }}</span>
-            <span v-if="pendingSyncCount > 0 && !syncEngineRunning" class="ps-hbadge ps-hbadge--warn">{{ pendingSyncCount }}</span>
+        <!-- Tabs -->
+        <div class="ps-tabs">
+          <button class="ps-tab" :class="tab==='capture' && 'ps-tab--on'" @click="setTab('capture')">Capture</button>
+          <button class="ps-tab" :class="tab==='records' && 'ps-tab--on'" @click="setTab('records')">Records</button>
+          <button class="ps-tab" :class="tab==='queue'   && 'ps-tab--on'" @click="setTab('queue')">
+            Referral Queue<span v-if="openReferrals > 0" class="ps-tab-dot"/>
           </button>
         </div>
-      </div>
-
-      <!-- Session stats strip: Today / Symptomatic / Uploaded / Pending -->
-      <div class="ps-session-strip">
-        <div class="ps-ss-cell">
-          <span class="ps-ss-n">{{ todayCount }}</span>
-          <span class="ps-ss-l">Today</span>
-        </div>
-        <div class="ps-ss-cell">
-          <span class="ps-ss-n ps-ss-n--symptom">{{ symptomaticCount }}</span>
-          <span class="ps-ss-l">Symptomatic</span>
-        </div>
-        <div class="ps-ss-cell">
-          <span class="ps-ss-n ps-ss-n--ok">{{ syncedCount }}</span>
-          <span class="ps-ss-l">Uploaded</span>
-        </div>
-        <div class="ps-ss-cell">
-          <span class="ps-ss-n" :class="pendingSyncCount > 0 ? 'ps-ss-n--warn' : 'ps-ss-n--ok'">{{ pendingSyncCount }}</span>
-          <span class="ps-ss-l">Pending</span>
-        </div>
-      </div>
-
-      <!-- POE context bar: name, district, connectivity pill -->
-      <div class="ps-poe-bar">
-        <div class="ps-poe-ic" aria-hidden="true">
-          <svg viewBox="0 0 14 14" fill="none" stroke="rgba(255,255,255,0.8)" stroke-width="1.5" stroke-linecap="round">
-            <path d="M7 1C4.2 1 2 3.2 2 6c0 4 5 7 5 7s5-3 5-7c0-2.8-2.2-5-5-5z"/><circle cx="7" cy="6" r="1.5"/>
-          </svg>
-        </div>
-        <div class="ps-poe-info">
-          <div class="ps-poe-title">{{ auth.poe_code ?? '—' }}</div>
-          <div class="ps-poe-sub">{{ auth.district_code ?? '—' }} · {{ auth.pheoc_code ?? '—' }} · {{ auth.country_code ?? '—' }}</div>
-        </div>
-        <div class="ps-conn-pill" :class="isOnline ? 'ps-conn--online' : 'ps-conn--offline'">
-          <div class="ps-cp-dot" :class="isOnline ? 'ps-cp-dot--on' : 'ps-cp-dot--off'" />
-          <span class="ps-cp-txt">{{ isOnline ? 'Online' : 'Offline' }}</span>
-        </div>
-      </div>
-
-      <!-- Tab selector: Capture | Records | Queue -->
-      <div class="ps-tabs">
-        <button class="ps-tab" :class="{ 'ps-tab--active': showTab === 'capture' }" @click="showTab = 'capture'" type="button">Capture</button>
-        <button class="ps-tab" :class="{ 'ps-tab--active': showTab === 'records' }" @click="showTab = 'records'; loadRecords()" type="button">Records</button>
-        <button class="ps-tab" :class="{ 'ps-tab--active': showTab === 'queue' }" @click="showTab = 'queue'; loadQueue()" type="button">
-          Queue
-          <span v-if="openReferrals > 0" class="ps-tab-badge">{{ openReferrals }}</span>
-        </button>
       </div>
     </IonHeader>
 
-    <IonContent class="ps-content" :scrollY="true">
+    <!-- ═══════════════════════════════════════════════════════════
+         LIGHT ZONE — Content
+    ═══════════════════════════════════════════════════════════════ -->
+    <IonContent :fullscreen="true" :scroll-y="tab !== 'capture'" class="ps-content">
+      <IonRefresher slot="fixed" @ionRefresh="e => loadStats().then(() => e.target.complete())">
+        <IonRefresherContent refreshing-spinner="crescent"/>
+      </IonRefresher>
 
-      <!-- ══════════════════════════════════════════════════════════
-           PERMISSION GUARD — shows if user cannot screen here
-      ══════════════════════════════════════════════════════════ -->
-      <div v-if="!canScreen" class="ps-guard-banner" role="alert">
-        <div class="ps-guard-icon" aria-hidden="true">
-          <svg viewBox="0 0 18 18" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round">
-            <path d="M9 2L3 5v5c0 4 3.5 7 6 8 2.5-1 6-4 6-8V5L9 2z"/>
-            <line x1="9" y1="7" x2="9" y2="10"/><circle cx="9" cy="12.5" r=".7" fill="#fff"/>
-          </svg>
-        </div>
-        <div class="ps-guard-info">
+      <!-- Permission guard -->
+      <div v-if="!canScreen" class="ps-guard" role="alert">
+        <span class="ps-guard-ic">🛡</span>
+        <div>
           <div class="ps-guard-title">Access Restricted</div>
-          <div class="ps-guard-sub">Your role ({{ auth.role_key ?? 'unknown' }}) does not have can_do_primary_screening. Contact your administrator.</div>
+          <div class="ps-guard-sub">Role {{ auth?.role_key }} cannot perform primary screening here.</div>
         </div>
       </div>
 
-      <!-- ══════════════════════════════════════════════════════════
-           TAB: CAPTURE FORM — premium, animated, instant
-      ══════════════════════════════════════════════════════════ -->
-      <div v-show="showTab === 'capture'">
+      <!-- ════════════════════════════════════════════════════════
+           TAB: CAPTURE — zero-scroll single viewport
+      ════════════════════════════════════════════════════════ -->
+      <div v-show="tab === 'capture'" class="ps-capture">
 
-        <!-- ── GENDER SELECTOR — full-width glass cards ── -->
-        <div class="pf-section">
-          <div class="pf-label">Sex</div>
-          <div class="pf-gender-row">
-            <button
-              v-for="g in GENDERS" :key="g.value"
-              class="pf-gender-card"
-              :class="{ 'pf-gender-card--male': g.value==='MALE', 'pf-gender-card--female': g.value==='FEMALE', 'pf-gender-card--active': form.gender === g.value }"
-              type="button" :aria-pressed="form.gender === g.value" :aria-label="g.label"
-              @click="form.gender = g.value; clearFieldError('gender')"
-            >
-              <!-- Animated selection ring -->
-              <span class="pf-gc-ring" aria-hidden="true"></span>
-              <span class="pf-gc-icon" aria-hidden="true" v-html="g.svg"></span>
-              <span class="pf-gc-lbl">{{ g.label }}</span>
-              <span v-if="form.gender === g.value" class="pf-gc-tick" aria-hidden="true">
-                <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="2 7 5.5 10.5 12 3"/></svg>
-              </span>
-            </button>
-          </div>
-          <div v-if="fieldErrors.gender" class="pf-err" role="alert">{{ fieldErrors.gender }}</div>
+        <!-- Sync error dismissible -->
+        <div v-if="syncError" class="ps-sync-err" role="alert">
+          <span>{{ syncError }}</span>
+          <button @click="syncError = ''" aria-label="Dismiss">✕</button>
         </div>
 
-        <!-- ── TEMPERATURE — floating label input with live gauge ── -->
-        <div class="pf-section">
-          <div class="pf-label">Temperature <span class="pf-opt">optional</span></div>
-          <div class="pf-temp-card" :class="{ 'pf-temp-card--focus': focusTemp, 'pf-temp-card--warn': tempWarningLevel==='warn', 'pf-temp-card--crit': tempWarningLevel==='danger' }">
-            <div class="pf-temp-icon" aria-hidden="true">
-              <svg viewBox="0 0 18 18" fill="none" stroke-width="1.6" stroke-linecap="round"
-                :stroke="tempWarningLevel==='danger'?'#C62828':tempWarningLevel==='warn'?'#E65100':'#1565C0'">
-                <path d="M11 11V3.5a2 2 0 00-4 0V11a4 4 0 104 0z"/>
-              </svg>
-            </div>
-            <div class="pf-temp-body">
-              <input
-                ref="tempInputRef"
-                v-model="form.temperature_raw"
-                type="number" step="0.1"
-                :min="tempUnit==='C'?25:77" :max="tempUnit==='C'?45:113"
-                class="pf-temp-input-el"
-                placeholder="—"
-                aria-label="Temperature"
-                @focus="focusTemp=true"
-                @blur="focusTemp=false; validateTemp()"
-                @input="validateTemp()"
-              />
-              <!-- Live warning text under input -->
-              <span v-if="tempWarning" class="pf-temp-hint" :class="`pf-temp-hint--${tempWarningLevel}`">{{ tempWarning }}</span>
-            </div>
-            <!-- Unit toggle pill -->
-            <div class="pf-unit-pill">
-              <button class="pf-unit-btn" :class="{ 'pf-unit-btn--on': tempUnit==='C' }" type="button" @click="switchTempUnit('C')">°C</button>
-              <button class="pf-unit-btn" :class="{ 'pf-unit-btn--on': tempUnit==='F' }" type="button" @click="switchTempUnit('F')">°F</button>
-            </div>
-            <button v-if="form.temperature_raw" class="pf-temp-x" type="button" aria-label="Clear temperature" @click="clearTemp">
-              <svg viewBox="0 0 12 12" fill="none" stroke="#B0BEC5" stroke-width="2" stroke-linecap="round"><line x1="2" y1="2" x2="10" y2="10"/><line x1="10" y1="2" x2="2" y2="10"/></svg>
+        <!-- ── DIRECTION ─────────────────────────────────────── -->
+        <div class="ps-field-row">
+          <span class="ps-field-lbl">Direction</span>
+          <div class="ps-dir-pills">
+            <button v-for="d in DIRS" :key="d.v"
+              class="ps-dir-pill"
+              :class="form.direction === d.v && ('ps-dir-pill--' + d.k)"
+              @click="form.direction = d.v; clearE('direction')"
+              :aria-pressed="form.direction === d.v">
+              {{ d.label }}
             </button>
           </div>
-          <!-- Animated fever gauge bar — only when value entered -->
-          <div v-if="form.temperature_raw && !fieldErrors.temperature" class="pf-gauge-wrap" aria-hidden="true">
-            <div class="pf-gauge-track">
-              <div class="pf-gauge-fill" :class="`pf-gauge-fill--${tempWarningLevel||'normal'}`" :style="{ width: tempScalePercent + '%' }"></div>
-              <div class="pf-gauge-thumb" :class="`pf-gauge-thumb--${tempWarningLevel||'normal'}`" :style="{ left: tempScalePercent + '%' }"></div>
-            </div>
-          </div>
-          <div v-if="fieldErrors.temperature" class="pf-err" role="alert">{{ fieldErrors.temperature }}</div>
+          <span v-if="errors.direction" class="ps-ferr">{{ errors.direction }}</span>
         </div>
 
-        <!-- ── SYMPTOMS — 2 hero tap targets ── -->
-        <div class="pf-section pf-section--last">
-          <div class="pf-label">Symptoms Present? <span class="pf-req">IHR Required</span></div>
-
-          <!-- ── WHO SYMPTOM REFERENCE — tap to expand, no clutter ── -->
-          <div class="pf-syref">
-            <button class="pf-syref-toggle" type="button" @click="syrefOpen = !syrefOpen" :aria-expanded="syrefOpen">
-              <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round">
-                <circle cx="7" cy="7" r="5.5"/>
-                <line x1="7" y1="5" x2="7" y2="7.5"/><circle cx="7" cy="9.5" r=".5" fill="currentColor"/>
-              </svg>
-              <span>Does traveler report any of the following?</span>
-              <svg class="pf-syref-chevron" :class="{ 'pf-syref-chevron--open': syrefOpen }"
-                viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round">
-                <polyline points="2 3.5 5 6.5 8 3.5"/>
-              </svg>
-            </button>
-            <transition name="pf-slide">
-              <div v-if="syrefOpen" class="pf-syref-body">
-                <span v-for="s in WHO_SYMPTOMS" :key="s" class="pf-syref-chip">{{ s }}</span>
-              </div>
-            </transition>
-          </div>
-
-          <div class="pf-sym-row">
-            <!-- NO -->
+        <!-- ── SEX ──────────────────────────────────────────── -->
+        <div class="ps-field-row">
+          <span class="ps-field-lbl">Sex</span>
+          <div class="ps-sex-pills">
             <button
-              class="pf-sym-card pf-sym-card--no"
-              :class="{ 'pf-sym-card--active': form.symptoms_present === 0 }"
-              type="button" aria-label="No symptoms" :aria-pressed="form.symptoms_present === 0"
-              @click="form.symptoms_present = 0; clearFieldError('symptoms')"
-            >
-              <span class="pf-sc-ring" aria-hidden="true"></span>
-              <span class="pf-sc-icon" aria-hidden="true">
-                <svg viewBox="0 0 32 32" fill="none" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"
-                  :stroke="form.symptoms_present===0?'#fff':'#90A4AE'">
-                  <polyline points="4 16 12 24 28 8"/>
-                </svg>
-              </span>
-              <span class="pf-sc-lbl">Clear</span>
-              <span class="pf-sc-sub">No symptoms</span>
+              class="ps-sex-btn ps-sex-btn--m"
+              :class="form.gender === 'MALE' && 'ps-sex-btn--active ps-sex-btn--m-active'"
+              @click="form.gender = 'MALE'; clearE('gender')"
+              :aria-pressed="form.gender === 'MALE'">
+              ♂ Male
             </button>
-            <!-- YES -->
             <button
-              class="pf-sym-card pf-sym-card--yes"
-              :class="{ 'pf-sym-card--active': form.symptoms_present === 1 }"
-              type="button" aria-label="Symptoms present — referral will be created" :aria-pressed="form.symptoms_present === 1"
-              @click="form.symptoms_present = 1; clearFieldError('symptoms')"
-            >
-              <span class="pf-sc-ring" aria-hidden="true"></span>
-              <span class="pf-sc-icon" aria-hidden="true">
-                <svg viewBox="0 0 32 32" fill="none" stroke-width="2.4" stroke-linecap="round"
-                  :stroke="form.symptoms_present===1?'#fff':'#90A4AE'">
-                  <circle cx="16" cy="16" r="11"/>
-                  <line x1="16" y1="10" x2="16" y2="17"/><circle cx="16" cy="21" r="1.2" :fill="form.symptoms_present===1?'#fff':'#90A4AE'"/>
-                </svg>
-              </span>
-              <span class="pf-sc-lbl">Refer</span>
-              <span class="pf-sc-sub">→ Secondary</span>
+              class="ps-sex-btn ps-sex-btn--f"
+              :class="form.gender === 'FEMALE' && 'ps-sex-btn--active ps-sex-btn--f-active'"
+              @click="form.gender = 'FEMALE'; clearE('gender')"
+              :aria-pressed="form.gender === 'FEMALE'">
+              ♀ Female
             </button>
           </div>
-          <div v-if="fieldErrors.symptoms" class="pf-err" role="alert">{{ fieldErrors.symptoms }}</div>
+          <span v-if="errors.gender" class="ps-ferr">{{ errors.gender }}</span>
+        </div>
 
-          <!-- ── TRAVELER NAME — slides in only when symptoms = YES ── -->
-          <transition name="pf-slide">
-            <div v-if="form.symptoms_present === 1" class="pf-name-wrap">
-              <div class="pf-name-card" :class="{ 'pf-name-card--focus': focusName }">
-                <svg viewBox="0 0 18 18" fill="none" stroke="#90A4AE" stroke-width="1.6" stroke-linecap="round" aria-hidden="true">
-                  <circle cx="9" cy="6" r="3.5"/><path d="M2 16c0-3.5 3-6 7-6s7 2.5 7 6"/>
-                </svg>
+        <!-- ── TEMPERATURE ─────────────────────────────────── -->
+        <div class="ps-field-row ps-field-row--temp-wrap">
+          <div class="ps-temp-top">
+            <span class="ps-field-lbl">Temp <span class="ps-lbl-opt">optional</span></span>
+            <div class="ps-temp-row">
+              <div class="ps-temp-input-wrap"
+                :class="[focusTemp && 'ps-temp-input-wrap--focus', tempLevel === 'crit' && 'ps-temp-input-wrap--crit', tempLevel === 'warn' && 'ps-temp-input-wrap--warn']">
                 <input
-                  v-model="form.traveler_full_name"
-                  type="text" class="pf-name-input" maxlength="150"
-                  placeholder="Traveler name (optional)"
-                  autocomplete="off" spellcheck="false"
-                  @focus="focusName=true"
-                  @blur="focusName=false; form.traveler_full_name=form.traveler_full_name.trim()"
+                  v-model="form.temp"
+                  type="number" step="0.1"
+                  :min="tempUnit === 'C' ? 30 : 86"
+                  :max="tempUnit === 'C' ? 43 : 109.4"
+                  class="ps-temp-input"
+                  placeholder="—"
+                  inputmode="decimal"
+                  aria-label="Temperature value"
+                  @focus="focusTemp=true"
+                  @blur="focusTemp=false; validateTemp()"
+                  @input="validateTempSoft()"
                 />
+                <span class="ps-temp-unit-lbl">°{{ tempUnit }}</span>
+              </div>
+              <!-- Unit toggle -->
+              <div class="ps-unit-toggle">
+                <button class="ps-unit-btn" :class="tempUnit==='C' && 'ps-unit-btn--on'"
+                  @click="switchUnit('C')" type="button">°C</button>
+                <button class="ps-unit-btn" :class="tempUnit==='F' && 'ps-unit-btn--on'"
+                  @click="switchUnit('F')" type="button">°F</button>
+              </div>
+              <!-- Fever level indicator dot -->
+              <div v-if="form.temp" class="ps-temp-level" :class="'ps-temp-level--' + (tempLevel || 'normal')">
+                {{ tempLevel === 'crit' ? '🔴' : tempLevel === 'warn' ? '🟡' : '🟢' }}
+                <span>{{ tempLevel === 'crit' ? 'High fever' : tempLevel === 'warn' ? 'Elevated' : 'Normal' }}</span>
+              </div>
+              <button v-if="form.temp" class="ps-temp-clear" @click="form.temp=''; clearE('temp')" aria-label="Clear temperature">✕</button>
+            </div>
+          </div>
+          <div v-if="errors.temp" class="ps-ferr">{{ errors.temp }}</div>
+          <div v-if="errors.tempWarn && !errors.temp" class="ps-fwarn">{{ errors.tempWarn }}</div>
+        </div>
+
+        <!-- ── FEVER AUTO-GUARD BANNER ──────────────────────── -->
+        <transition name="ps-reveal">
+          <div v-if="feverAutoGuard" class="ps-fever-guard" role="alert">
+            <svg viewBox="0 0 16 16" fill="none" stroke="#CC8800" stroke-width="1.6" stroke-linecap="round" aria-hidden="true">
+              <path d="M8 1L1 14h14L8 1z"/><line x1="8" y1="5.5" x2="8" y2="9.5"/><circle cx="8" cy="11.5" r=".7" fill="#CC8800"/>
+            </svg>
+            <div class="ps-fever-guard-body">
+              <div class="ps-fever-guard-title">Clinical Intelligence Alert</div>
+              <div class="ps-fever-guard-text">{{ feverAutoGuard }}</div>
+              <div class="ps-fever-guard-actions">
+                <button class="ps-fever-guard-btn ps-fever-guard-btn--sym" type="button"
+                  @click="form.symptoms = 1; clearE('symptoms')">
+                  Mark Symptomatic
+                </button>
+                <button class="ps-fever-guard-btn ps-fever-guard-btn--clear" type="button"
+                  @click="form.temp = ''; clearE('temp')">
+                  Clear Temperature
+                </button>
+              </div>
+            </div>
+          </div>
+        </transition>
+
+        <!-- ── WHO SYMPTOMS — categorized, compact panel ────── -->
+        <div class="ps-who-panel">
+          <button class="ps-who-toggle" @click="whoOpen=!whoOpen" :aria-expanded="whoOpen" type="button">
+            <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true">
+              <circle cx="7" cy="7" r="5.5"/>
+              <line x1="7" y1="5" x2="7" y2="8.5"/>
+              <circle cx="7" cy="10.5" r=".6" fill="currentColor"/>
+            </svg>
+            IHR Surveillance Symptoms (WHO reference)
+            <svg class="ps-who-chev" :class="whoOpen && 'ps-who-chev--open'"
+              viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
+              <polyline points="2 4 5 7 8 4"/>
+            </svg>
+          </button>
+          <transition name="ps-acc">
+            <div v-if="whoOpen" class="ps-who-cats">
+              <div v-for="cat in WHO_CATS" :key="cat.name" class="ps-who-cat">
+                <span class="ps-who-cat-label">{{ cat.name }}</span>
+                <div class="ps-who-chips">
+                  <span v-for="s in cat.items" :key="s" class="ps-who-chip">{{ s }}</span>
+                </div>
               </div>
             </div>
           </transition>
-
-          <!-- Referral preview — shown when symptoms = YES -->
-          <div v-if="form.symptoms_present === 1" class="ps-referral-preview">
-            <div class="ps-rp-header" :class="`ps-rp-header--${referralPriority.toLowerCase()}`">
-              <svg viewBox="0 0 16 16" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
-                <path d="M8 1L2 4v4c0 3.5 2.5 6 6 7 3.5-1 6-3.5 6-7V4L8 1z"/><polyline points="5.5 8 7 9.5 10.5 6.5"/>
-              </svg>
-              <span class="ps-rp-h-title">Auto-Referral Will Be Created</span>
-              <span class="ps-rp-h-badge" :class="`ps-rp-badge--${referralPriority.toLowerCase()}`">{{ referralPriority }}</span>
-            </div>
-            <div class="ps-rp-body">
-              <div class="ps-rp-row"><span class="ps-rp-k">Assigned To</span><span class="ps-rp-v">POE Secondary Officer</span></div>
-              <div class="ps-rp-row"><span class="ps-rp-k">Priority</span><span class="ps-rp-v" :class="`ps-rp-v--${referralPriority.toLowerCase()}`">{{ referralPriority }}</span></div>
-              <div class="ps-rp-row"><span class="ps-rp-k">Reason</span><span class="ps-rp-v">PRIMARY_SYMPTOMS_DETECTED</span></div>
-              <div v-if="form.temperature_raw" class="ps-rp-row">
-                <span class="ps-rp-k">Temperature</span>
-                <span class="ps-rp-v" :class="tempWarningLevel === 'danger' ? 'ps-rp-v--crit' : (tempWarningLevel === 'warn' ? 'ps-rp-v--high' : '')">
-                  {{ form.temperature_raw }}°{{ tempUnit }}
-                </span>
-              </div>
-              <div class="ps-rp-row"><span class="ps-rp-k">Gender</span><span class="ps-rp-v">{{ form.gender || 'Not yet selected' }}</span></div>
-              <div v-if="form.traveler_full_name" class="ps-rp-row"><span class="ps-rp-k">Traveler</span><span class="ps-rp-v">{{ form.traveler_full_name }}</span></div>
-            </div>
-          </div>
         </div>
 
-        <!-- ── CAPTURE BUTTON ── -->
-        <div class="ps-capture-section">
+        <!-- ── SYMPTOMS — hero YES/NO ──────────────────────── -->
+        <div class="ps-sym-section">
+          <div class="ps-sym-label">
+            <span class="ps-field-lbl">Symptoms present?</span>
+            <span class="ps-req-badge">IHR Required</span>
+          </div>
+          <div class="ps-sym-row">
+            <button
+              class="ps-sym-no"
+              :class="form.symptoms === 0 && 'ps-sym-no--active'"
+              @click="form.symptoms = 0; clearE('symptoms')"
+              :aria-pressed="form.symptoms === 0"
+              aria-label="No symptoms">
+              <div class="ps-sym-ic" aria-hidden="true">
+                <svg viewBox="0 0 28 28" fill="none" stroke-width="2.4" stroke-linecap="round"
+                  :stroke="form.symptoms===0 ? '#fff' : '#94A3B8'">
+                  <polyline points="4 14 11 21 24 8"/>
+                </svg>
+              </div>
+              <span class="ps-sym-main">Clear</span>
+              <span class="ps-sym-sub">No symptoms</span>
+            </button>
+
+            <button
+              class="ps-sym-yes"
+              :class="form.symptoms === 1 && 'ps-sym-yes--active'"
+              @click="form.symptoms = 1; clearE('symptoms')"
+              :aria-pressed="form.symptoms === 1"
+              aria-label="Symptoms present — referral will be created">
+              <div class="ps-sym-ic" aria-hidden="true">
+                <svg viewBox="0 0 28 28" fill="none" stroke-width="2.4" stroke-linecap="round"
+                  :stroke="form.symptoms===1 ? '#fff' : '#94A3B8'">
+                  <circle cx="14" cy="14" r="10"/>
+                  <line x1="14" y1="9" x2="14" y2="16"/>
+                  <circle cx="14" cy="20" r="1.2" :fill="form.symptoms===1 ? '#fff' : '#94A3B8'"/>
+                </svg>
+              </div>
+              <span class="ps-sym-main">Symptomatic</span>
+              <span class="ps-sym-sub">Referral created</span>
+            </button>
+          </div>
+          <span v-if="errors.symptoms" class="ps-ferr">{{ errors.symptoms }}</span>
+        </div>
+
+        <!-- ── NAME — progressive reveal on symptomatic ─────── -->
+        <transition name="ps-reveal">
+          <div v-if="form.symptoms === 1" class="ps-name-section">
+            <div class="ps-name-row">
+              <span class="ps-field-lbl">Traveler Name <span class="ps-req">*</span></span>
+              <div class="ps-name-field" :class="[focusName && 'ps-name-field--focus', errors.name && 'ps-name-field--err']">
+                <input
+                  ref="nameRef"
+                  v-model="form.name"
+                  class="ps-name-input"
+                  type="text"
+                  placeholder="Full name as on travel document"
+                  maxlength="150"
+                  autocomplete="off"
+                  autocapitalize="characters"
+                  aria-label="Traveler full name"
+                  @focus="focusName=true"
+                  @blur="focusName=false"
+                  @input="clearE('name')"
+                />
+                <button v-if="form.name" class="ps-name-clear" @click="form.name=''" aria-label="Clear" type="button">✕</button>
+              </div>
+              <span v-if="errors.name" class="ps-ferr">{{ errors.name }}</span>
+            </div>
+            <!-- Priority preview inline -->
+            <div class="ps-priority-strip" :class="'ps-priority-strip--' + priority.toLowerCase()">
+              <div class="ps-pd" :class="'ps-pd--' + priority.toLowerCase()"/>
+              <span class="ps-pl">{{ priority }} PRIORITY</span>
+              <span class="ps-pr">{{ priorityReason }}</span>
+            </div>
+          </div>
+        </transition>
+
+        <!-- ── CAPTURE BUTTON ──────────────────────────────── -->
+        <div class="ps-capture-footer">
           <button
-            class="ps-capture-btn"
-            :class="{
-              'ps-capture-btn--symptomatic': form.symptoms_present === 1,
-              'ps-capture-btn--loading': capturing,
-              'ps-capture-btn--disabled': !canCapture || capturing
-            }"
-            type="button"
+            class="ps-cap-btn"
+            :class="[
+              canCapture && form.symptoms === 1 && 'ps-cap-btn--referral',
+              canCapture && form.symptoms === 0 && 'ps-cap-btn--clear',
+              (!canCapture || capturing) && 'ps-cap-btn--disabled',
+              capturing && 'ps-cap-btn--busy',
+            ]"
             :disabled="!canCapture || capturing"
-            aria-label="Capture and save screening record"
             @click="captureScreening"
-          >
-            <div class="ps-cb-icon" aria-hidden="true">
-              <svg v-if="!capturing" viewBox="0 0 20 20" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round">
-                <circle cx="10" cy="10" r="8"/><polyline points="6 10 9 13 14 7"/>
+            aria-label="Capture record">
+            <div class="ps-cap-btn-inner">
+              <svg v-if="!capturing" viewBox="0 0 20 20" fill="none" stroke="currentColor"
+                stroke-width="2" stroke-linecap="round" aria-hidden="true">
+                <circle cx="10" cy="10" r="8"/>
+                <polyline points="6 10 9 13 14 7"/>
               </svg>
-              <svg v-else viewBox="0 0 20 20" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" class="ps-spin">
+              <svg v-else viewBox="0 0 20 20" fill="none" stroke="currentColor"
+                stroke-width="2" stroke-linecap="round" class="ps-spin" aria-hidden="true">
                 <path d="M18 10A8 8 0 1 1 10 2"/>
               </svg>
+              <span>{{ capturing ? 'Saving…' : (form.symptoms === 1 ? 'Capture & Refer →' : 'Capture & Save →') }}</span>
             </div>
-            <div class="ps-cb-text">
-              <span class="ps-cb-main">{{ capturing ? 'Saving…' : (form.symptoms_present === 1 ? 'Capture & Refer' : 'Capture & Save') }}</span>
-              <span class="ps-cb-sub">{{ capturing ? 'Writing to offline store' : 'Records offline immediately' }}</span>
-            </div>
-            <div class="ps-cb-shortcut" aria-hidden="true">⏎</div>
           </button>
-
-          <!-- Capture disabled reason -->
-          <div v-if="!canCapture && !capturing" class="ps-capture-hint" role="status">
-            {{ captureHint }}
-          </div>
+          <div v-if="!canCapture && !capturing" class="ps-cap-hint">{{ captureHint }}</div>
         </div>
 
-        <!-- ── SUCCESS / REFERRAL CONFIRMATION STATE ── -->
-        <div v-if="lastResult" class="ps-success-area">
-          <!-- Symptomatic success — referral created -->
-          <div v-if="lastResult.symptoms_present === 1" class="ps-success-toast ps-success-toast--referral">
-            <div class="ps-st-icon ps-st-icon--ref" aria-hidden="true">
-              <svg viewBox="0 0 20 20" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round">
-                <path d="M10 2L3 6v5c0 4 3 7 7 8 4-1 7-4 7-8V6L10 2z"/><polyline points="6 10 9 13 14 7"/>
-              </svg>
-            </div>
-            <div class="ps-st-info">
-              <div class="ps-st-title">Saved · Referral Created</div>
-              <div class="ps-st-sub">
-                Priority: <strong>{{ lastResult.notification?.priority ?? '—' }}</strong> ·
-                Refer traveler to Secondary Screening ·
-                <span class="ps-st-sync">{{ SYNC.LABELS[lastResult.sync_status] }}</span>
+        <!-- ── RESULT PANEL ────────────────────────────────── -->
+        <transition name="ps-result">
+          <div v-if="lastResult" class="ps-result"
+            :class="lastResult.symptoms_present === 1 ? 'ps-result--ref' : 'ps-result--ok'">
+            <div class="ps-result-hdr">
+              <div class="ps-result-icon" aria-hidden="true">
+                {{ lastResult.symptoms_present === 1 ? '🔔' : '✓' }}
+              </div>
+              <div class="ps-result-title">
+                {{ lastResult.symptoms_present === 1 ? 'Saved · Referral Created' : 'Saved · Traveler Cleared' }}
+              </div>
+              <div class="ps-result-count">
+                <span class="ps-result-n">{{ todayCount }}</span>
+                <span class="ps-result-l">today</span>
               </div>
             </div>
-            <div class="ps-st-counter" aria-label="Today's total">
-              <span class="ps-st-count-n">{{ todayCount }}</span>
-              <span class="ps-st-count-l">Today</span>
+            <div class="ps-result-chips">
+              <span class="ps-rc">{{ lastResult.traveler_direction }}</span>
+              <span class="ps-rc">{{ lastResult.gender }}</span>
+              <span v-if="lastResult.traveler_full_name" class="ps-rc">{{ lastResult.traveler_full_name }}</span>
+              <span v-if="lastResult.temperature_value" class="ps-rc ps-rc--temp">
+                {{ lastResult.temperature_value.toFixed(1) }}°{{ lastResult.temperature_unit }}
+              </span>
+              <span v-if="lastResult.symptoms_present === 1" class="ps-rc ps-rc--priority"
+                :class="'ps-rc--' + (lastResult.notification?.priority || 'NORMAL').toLowerCase()">
+                {{ lastResult.notification?.priority || 'NORMAL' }}
+              </span>
+              <span class="ps-rc ps-rc--sync">{{ SYNC.LABELS[lastResult.sync_status] || lastResult.sync_status }}</span>
+            </div>
+            <div class="ps-result-actions">
+              <button class="ps-result-void" @click="promptVoid" type="button">Void Record</button>
+              <button class="ps-result-next" @click="resetForm" type="button">Next Traveler →</button>
             </div>
           </div>
+        </transition>
 
-          <!-- Asymptomatic success -->
-          <div v-else class="ps-success-toast ps-success-toast--ok">
-            <div class="ps-st-icon ps-st-icon--ok" aria-hidden="true">
-              <svg viewBox="0 0 20 20" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round"><polyline points="4 10 8 14 16 6"/></svg>
-            </div>
-            <div class="ps-st-info">
-              <div class="ps-st-title">Saved · No Symptoms Detected</div>
-              <div class="ps-st-sub">Traveler cleared · <span class="ps-st-sync">{{ SYNC.LABELS[lastResult.sync_status] }}</span></div>
-            </div>
-            <div class="ps-st-counter" aria-label="Today's total">
-              <span class="ps-st-count-n">{{ todayCount }}</span>
-              <span class="ps-st-count-l">Today</span>
-            </div>
-          </div>
+      </div><!-- /capture -->
 
-          <!-- Post-capture action row -->
-          <div class="ps-void-row">
-            <button class="ps-void-btn" type="button" @click="promptVoid(lastResult)" aria-label="Void this record">
-              <svg viewBox="0 0 14 14" fill="none" stroke="#90A4AE" stroke-width="1.5" stroke-linecap="round"><path d="M11 3H8.5L7.5 2h-3L3.5 3H1M12 3l-.6 8.4a1 1 0 01-1 .6H3.6a1 1 0 01-1-.6L2 3"/></svg>
-              <span class="ps-void-btn-txt">Void Record</span>
-            </button>
-            <button class="ps-next-btn" type="button" @click="resetForm" aria-label="Start next traveler screening">
-              <svg viewBox="0 0 14 14" fill="none" stroke="#1565C0" stroke-width="1.8" stroke-linecap="round"><polyline points="5 3 10 7 5 11"/></svg>
-              <span class="ps-next-btn-txt">Next Traveler →</span>
-            </button>
-          </div>
-        </div>
-
-        <!-- Sync engine error banner -->
-        <div v-if="syncError" class="ps-sync-error" role="alert">
-          <svg viewBox="0 0 16 16" fill="none" stroke="#C62828" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="8" r="6.5"/><line x1="8" y1="5" x2="8" y2="9"/><circle cx="8" cy="11.5" r=".7" fill="#C62828"/></svg>
-          <div>
-            <div class="ps-sync-error-title">Sync Error</div>
-            <div class="ps-sync-error-sub">{{ syncError }}</div>
-          </div>
-          <button class="ps-sync-error-dismiss" type="button" aria-label="Dismiss error" @click="syncError = ''">✕</button>
-        </div>
-
-        <div style="height: 24px;" aria-hidden="true" />
-      </div><!-- /capture tab -->
-
-      <!-- ══════════════════════════════════════════════════════════
-           TAB: RECORDS — paginated, date/filter modal
-      ══════════════════════════════════════════════════════════ -->
-      <div v-show="showTab === 'records'">
-        <div class="ps-tab-toolbar">
-          <!-- Filter button with current date label -->
-          <button class="ps-filter-btn" type="button" @click="filterModalOpen = true" aria-label="Filter records">
-            <svg viewBox="0 0 14 14" fill="none" stroke="#1565C0" stroke-width="1.6" stroke-linecap="round"><path d="M1 2h12M3 7h8M5 12h4"/></svg>
-            <span class="ps-filter-btn-txt">{{ filterDateLabel }}</span>
-            <svg viewBox="0 0 10 10" fill="none" stroke="#1565C0" stroke-width="1.6" stroke-linecap="round"><polyline points="2 3 5 7 8 3"/></svg>
+      <!-- ════════════════════════════════════════════════════════
+           TAB: RECORDS
+      ════════════════════════════════════════════════════════ -->
+      <div v-show="tab === 'records'" class="ps-records-tab">
+        <div class="ps-tab-bar">
+          <button class="ps-filter-btn" @click="filterOpen=true" type="button" aria-label="Filter">
+            <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true">
+              <path d="M1 2h12M3 6h8M5 10h4"/>
+            </svg>
+            {{ filterLabel }}
           </button>
-          <span class="ps-records-count">{{ recordsTotal }} record{{ recordsTotal !== 1 ? 's' : '' }}</span>
-          <button class="ps-refresh-btn" type="button" @click="loadRecords()" :disabled="recordsLoading" aria-label="Refresh">
-            <svg :class="{ 'ps-spin': recordsLoading }" viewBox="0 0 14 14" fill="none" stroke="#1565C0" stroke-width="1.8" stroke-linecap="round">
+          <span class="ps-total-lbl">{{ recordsTotal }} record{{ recordsTotal !== 1 ? 's' : '' }}</span>
+          <button class="ps-icon-btn" @click="loadRecords()" :disabled="recLoading" type="button" aria-label="Refresh">
+            <svg :class="recLoading && 'ps-spin'" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
               <path d="M12 7A5 5 0 1 1 7 2"/><polyline points="12 2 12 7 7 7"/>
             </svg>
           </button>
         </div>
-
-        <!-- Filter chips row -->
-        <div class="ps-filter-chips">
-          <button class="ps-chip" :class="{ 'ps-chip--active': filterSymptoms === 'ALL' }" @click="filterSymptoms = 'ALL'; loadRecords()" type="button">All</button>
-          <button class="ps-chip ps-chip--sym" :class="{ 'ps-chip--active': filterSymptoms === 'YES' }" @click="filterSymptoms = 'YES'; loadRecords()" type="button">Symptomatic</button>
-          <button class="ps-chip ps-chip--ok"  :class="{ 'ps-chip--active': filterSymptoms === 'NO' }"  @click="filterSymptoms = 'NO';  loadRecords()" type="button">Asymptomatic</button>
-          <button class="ps-chip ps-chip--warn" :class="{ 'ps-chip--active': filterSync === 'UNSYNCED' }" @click="filterSync = filterSync === 'UNSYNCED' ? 'ALL' : 'UNSYNCED'; loadRecords()" type="button">Pending</button>
+        <div class="ps-filter-row">
+          <button class="ps-fc" :class="fSym==='ALL' && 'ps-fc--on'" @click="fSym='ALL'; loadRecords()" type="button">All</button>
+          <button class="ps-fc ps-fc--sym" :class="fSym==='YES' && 'ps-fc--on'" @click="fSym='YES'; loadRecords()" type="button">Symptomatic</button>
+          <button class="ps-fc ps-fc--ok"  :class="fSym==='NO'  && 'ps-fc--on'" @click="fSym='NO';  loadRecords()" type="button">Clear</button>
+          <button class="ps-fc ps-fc--pending" :class="fSync==='UNSYNCED' && 'ps-fc--on'"
+            @click="fSync = fSync==='UNSYNCED' ? 'ALL' : 'UNSYNCED'; loadRecords()" type="button">Pending</button>
+          <button class="ps-fc" :class="fDir!=='ALL' && 'ps-fc--on ps-fc--dir'"
+            @click="cycleDir" type="button">{{ fDir === 'ALL' ? 'All Dirs' : fDir }}</button>
         </div>
-
-        <div v-if="recordsLoading" class="ps-loading" role="status">
-          <div class="ps-loading-dots"><div/><div/><div/></div>
-          <span>Loading…</span>
+        <div v-if="recLoading" class="ps-loading">
+          <div class="ps-dots"><div/><div/><div/></div>
         </div>
-
-        <div v-else-if="records.length === 0" class="ps-empty" role="status">
-          <svg viewBox="0 0 40 40" fill="none" stroke="#B0BEC5" stroke-width="1.5" stroke-linecap="round">
-            <rect x="8" y="6" width="24" height="28" rx="3"/><line x1="13" y1="13" x2="27" y2="13"/><line x1="13" y1="18" x2="27" y2="18"/><line x1="13" y1="23" x2="22" y2="23"/>
+        <div v-else-if="records.length === 0" class="ps-empty">
+          <svg viewBox="0 0 40 40" fill="none" stroke="#CBD5E1" stroke-width="1.5" stroke-linecap="round" aria-hidden="true">
+            <rect x="6" y="4" width="28" height="32" rx="2.5"/>
+            <line x1="12" y1="13" x2="28" y2="13"/>
+            <line x1="12" y1="19" x2="28" y2="19"/>
+            <line x1="12" y1="25" x2="21" y2="25"/>
           </svg>
-          <div class="ps-empty-title">No records for {{ filterDateLabel }}</div>
-          <div class="ps-empty-sub">Try a different date or filter</div>
+          <p>No records for {{ filterLabel }}</p>
         </div>
-
-        <div v-else class="ps-records-list">
-          <div
-            v-for="rec in records"
-            :key="rec.client_uuid"
-            class="ps-record-card"
-            :class="{
-              'ps-record-card--symptomatic': rec.symptoms_present === 1,
-              'ps-record-card--voided': rec.record_status === 'VOIDED'
-            }"
-          >
-            <div class="ps-rc-left">
-              <!-- Gender icon -->
-              <div class="ps-rc-avatar" :class="`ps-rc-avatar--${(rec.gender || 'UNKNOWN').toLowerCase()}`">
-                <svg v-if="rec.gender === 'MALE'" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="7" cy="7" r="4"/><line x1="10" y1="4" x2="14" y2="0"/><polyline points="11 0 14 0 14 3"/></svg>
-                <svg v-else-if="rec.gender === 'FEMALE'" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="8" cy="6" r="4"/><line x1="8" y1="10" x2="8" y2="15"/><line x1="5.5" y1="13" x2="10.5" y2="13"/></svg>
-                <svg v-else viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="8" cy="8" r="5"/></svg>
+        <div v-else class="ps-rec-list">
+          <div v-for="r in records" :key="r.client_uuid"
+            class="ps-rec-card"
+            :class="[r.symptoms_present===1 && 'ps-rec-card--sym', r.record_status==='VOIDED' && 'ps-rec-card--void']"
+            @click="selRecord=r"
+            tabindex="0" role="button" :aria-label="(r.traveler_full_name || r.gender) + ' · ' + fmtTime(r.captured_at)">
+            <div class="ps-rec-bar" :class="r.symptoms_present===1 ? 'ps-rec-bar--sym' : 'ps-rec-bar--ok'"/>
+            <div class="ps-rec-body">
+              <div class="ps-rec-top">
+                <span class="ps-rec-name">{{ r.traveler_full_name || r.gender }}</span>
+                <span class="ps-rec-time">{{ fmtTime(r.captured_at) }}</span>
+              </div>
+              <div class="ps-rec-mid">
+                <span>{{ r.gender }}</span>
+                <span class="ps-rec-dot">·</span>
+                <span>{{ r.traveler_direction }}</span>
+                <template v-if="r.temperature_value">
+                  <span class="ps-rec-dot">·</span>
+                  <span>{{ r.temperature_value.toFixed(1) }}°{{ r.temperature_unit }}</span>
+                </template>
+              </div>
+              <div class="ps-rec-bot">
+                <span class="ps-rbadge" :class="r.symptoms_present===1 ? 'ps-rbadge--sym' : 'ps-rbadge--ok'">
+                  {{ r.symptoms_present===1 ? 'Symptomatic' : 'Clear' }}
+                </span>
+                <span v-if="r.record_status==='VOIDED'" class="ps-rbadge ps-rbadge--void">VOIDED</span>
+                <span class="ps-rsync" :class="'ps-rsync--' + syncCls(r.sync_status)">
+                  {{ SYNC.LABELS[r.sync_status] || r.sync_status }}
+                </span>
               </div>
             </div>
-            <div class="ps-rc-body">
-              <div class="ps-rc-row1">
-                <span class="ps-rc-name">{{ rec.traveler_full_name || rec.gender || 'Unknown' }}</span>
-                <span class="ps-rc-time">{{ formatTime(rec.captured_at) }}</span>
-              </div>
-              <div class="ps-rc-row2">
-                <span class="ps-rc-pill" :class="rec.symptoms_present === 1 ? 'ps-rc-pill--sym' : 'ps-rc-pill--ok'">
-                  {{ rec.symptoms_present === 1 ? 'Symptomatic' : 'Asymptomatic' }}
-                </span>
-                <span v-if="rec.temperature_value" class="ps-rc-temp">{{ rec.temperature_value }}°{{ rec.temperature_unit }}</span>
-                <span v-if="rec.referral_created === 1 && rec.record_status !== 'VOIDED'" class="ps-rc-pill ps-rc-pill--ref">Referred</span>
-                <span v-if="rec.record_status === 'VOIDED'" class="ps-rc-pill ps-rc-pill--void">Voided</span>
-              </div>
-              <div class="ps-rc-row3">
-                <span class="ps-rc-sync" :class="`ps-rc-sync--${(rec.sync_status || 'UNSYNCED').toLowerCase()}`">
-                  {{ SYNC.LABELS[rec.sync_status] ?? rec.sync_status }}
-                </span>
-                <span v-if="rec.last_sync_error" class="ps-rc-err-hint" :title="rec.last_sync_error">⚠ {{ truncate(rec.last_sync_error, 40) }}</span>
-              </div>
-            </div>
-            <!-- Void action (only creator within 24h or admin) -->
-            <button
-              v-if="rec.record_status !== 'VOIDED' && canVoidRecord(rec)"
-              class="ps-rc-void-btn"
-              type="button"
-              aria-label="Void this record"
-              @click.stop="promptVoid(rec)"
-            >
-              <svg viewBox="0 0 14 14" fill="none" stroke="#90A4AE" stroke-width="1.5" stroke-linecap="round"><path d="M11 3H8.5L7.5 2h-3L3.5 3H1M12 3l-.6 8.4a1 1 0 01-1 .6H3.6a1 1 0 01-1-.6L2 3"/></svg>
-            </button>
+            <span class="ps-rec-arrow">›</span>
+          </div>
+          <div v-if="recordsTotal > PAGE_SIZE" class="ps-pages">
+            <button class="ps-pg-btn" :disabled="page===0" @click="page--;loadRecords(false)">← Prev</button>
+            <span class="ps-pg-info">{{ page+1 }} / {{ Math.ceil(recordsTotal/PAGE_SIZE) }}</span>
+            <button class="ps-pg-btn" :disabled="(page+1)*PAGE_SIZE>=recordsTotal" @click="page++;loadRecords(false)">Next →</button>
           </div>
         </div>
+      </div><!-- /records -->
 
-        <!-- Pagination bar -->
-        <div v-if="recordsTotal > RECORDS_PER_PAGE" class="ps-pagination">
-          <button class="ps-page-btn" type="button" :disabled="recordsPage === 0" @click="prevRecordsPage">← Prev</button>
-          <span class="ps-page-info">{{ recordsPage + 1 }} / {{ Math.ceil(recordsTotal / RECORDS_PER_PAGE) }}</span>
-          <button class="ps-page-btn" type="button" :disabled="(recordsPage + 1) * RECORDS_PER_PAGE >= recordsTotal" @click="nextRecordsPage">Next →</button>
-        </div>
-
-        <div style="height: 24px;" aria-hidden="true" />
-      </div><!-- /records tab -->
-
-      <!-- ══════════════════════════════════════════════════════════
-           TAB: REFERRAL QUEUE — OPEN notifications at this POE
-      ══════════════════════════════════════════════════════════ -->
-      <div v-show="showTab === 'queue'">
-        <div class="ps-tab-toolbar">
-          <span class="ps-tab-toolbar-title">Referral Queue — {{ auth.poe_code }}</span>
-          <!-- Queue status filter -->
-          <div class="ps-queue-filter">
-            <button class="ps-chip ps-chip--sm" :class="{ 'ps-chip--active': queueStatusFilter === 'OPEN' }" @click="queueStatusFilter = 'OPEN'; loadQueue()" type="button">Open</button>
-            <button class="ps-chip ps-chip--sm" :class="{ 'ps-chip--active': queueStatusFilter === 'ALL' }"  @click="queueStatusFilter = 'ALL';  loadQueue()" type="button">All</button>
-          </div>
-          <button class="ps-refresh-btn" type="button" @click="loadQueue()" :disabled="queueLoading" aria-label="Refresh queue">
-            <svg :class="{ 'ps-spin': queueLoading }" viewBox="0 0 14 14" fill="none" stroke="#1565C0" stroke-width="1.8" stroke-linecap="round">
+      <!-- ════════════════════════════════════════════════════════
+           TAB: QUEUE — referral queue
+      ════════════════════════════════════════════════════════ -->
+      <div v-show="tab === 'queue'" class="ps-queue-tab">
+        <div class="ps-tab-bar">
+          <span class="ps-total-lbl" style="font-weight:700;color:#0B1A30;">Referral Queue</span>
+          <button class="ps-fc" :class="qFilter==='OPEN' && 'ps-fc--on'" @click="qFilter='OPEN'; loadQueue()" type="button">Open</button>
+          <button class="ps-fc" :class="qFilter==='ALL'  && 'ps-fc--on'" @click="qFilter='ALL';  loadQueue()" type="button">All</button>
+          <button class="ps-icon-btn" @click="loadQueue()" :disabled="qLoading" type="button" aria-label="Refresh">
+            <svg :class="qLoading && 'ps-spin'" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
               <path d="M12 7A5 5 0 1 1 7 2"/><polyline points="12 2 12 7 7 7"/>
             </svg>
           </button>
         </div>
-
-        <div v-if="queueLoading" class="ps-loading" role="status" aria-label="Loading queue">
-          <div class="ps-loading-dots"><div/><div/><div/></div>
-          <span>Loading referral queue…</span>
-        </div>
-
-        <div v-else-if="queueItems.length === 0" class="ps-empty" role="status">
-          <svg viewBox="0 0 40 40" fill="none" stroke="#B0BEC5" stroke-width="1.5" stroke-linecap="round">
-            <path d="M20 6L4 14v10c0 8 7 14 16 16 9-2 16-8 16-16V14L20 6z"/><polyline points="13 20 17 24 27 14"/>
+        <div v-if="qLoading" class="ps-loading"><div class="ps-dots"><div/><div/><div/></div></div>
+        <div v-else-if="queue.length===0" class="ps-empty">
+          <svg viewBox="0 0 40 40" fill="none" stroke="#CBD5E1" stroke-width="1.5" stroke-linecap="round" aria-hidden="true">
+            <path d="M7 10a4 4 0 018 0M25 10a4 4 0 018 0M3 35c0-7.7 7-14 17-14s17 6.3 17 14"/>
+            <circle cx="11" cy="10" r="4"/><circle cx="29" cy="10" r="4"/><circle cx="20" cy="16" r="5"/>
           </svg>
-          <div class="ps-empty-title">No open referrals</div>
-          <div class="ps-empty-sub">All travelers cleared at this POE</div>
+          <p>No referrals in queue</p>
         </div>
-
-        <div v-else class="ps-queue-list">
-          <div
-            v-for="item in queueItems"
-            :key="item.notification_id"
-            class="ps-queue-card"
-            :class="`ps-queue-card--${(item.priority || 'NORMAL').toLowerCase()}`"
-          >
-            <!-- Priority indicator stripe -->
-            <div class="ps-qc-stripe" :class="`ps-qc-stripe--${(item.priority || 'NORMAL').toLowerCase()}`" aria-hidden="true" />
-
-            <div class="ps-qc-body">
-              <div class="ps-qc-row1">
-                <span class="ps-qc-priority-pill" :class="`ps-qcp--${(item.priority || 'NORMAL').toLowerCase()}`">{{ item.priority ?? 'NORMAL' }}</span>
-                <span class="ps-qc-time">{{ formatTime(item.notification_created_at) }}</span>
+        <div v-else class="ps-q-list">
+          <div v-for="q in queue" :key="q.client_uuid"
+            class="ps-q-card"
+            :class="['ps-q-card--' + (q.priority||'NORMAL').toLowerCase(), q.status==='CLOSED' && 'ps-q-card--closed']"
+            @click="selQueue=q" tabindex="0" role="button">
+            <div class="ps-q-top-bar" :class="'ps-qtb--' + (q.priority||'NORMAL').toLowerCase()"/>
+            <div class="ps-q-body">
+              <div class="ps-q-row1">
+                <span class="ps-q-pri" :class="'ps-q-pri--' + (q.priority||'NORMAL').toLowerCase()">{{ q.priority || 'NORMAL' }}</span>
+                <span class="ps-q-sts">{{ q.status }}</span>
+                <span class="ps-q-time">{{ fmtTime(q.created_at) }}</span>
               </div>
-              <div class="ps-qc-row2">
-                <span class="ps-qc-gender">{{ item.gender ?? '—' }}</span>
-                <span v-if="item.temperature_value" class="ps-qc-temp">{{ item.temperature_value }}°{{ item.temperature_unit }}</span>
-                <span v-if="item.traveler_full_name" class="ps-qc-name">· {{ item.traveler_full_name }}</span>
+              <div class="ps-q-name">{{ q.primary?.traveler_full_name || q.primary?.gender || 'Traveler' }}</div>
+              <div class="ps-q-chips">
+                <span v-if="q.primary?.traveler_direction" class="ps-qc">{{ q.primary.traveler_direction }}</span>
+                <span v-if="q.primary?.gender" class="ps-qc">{{ q.primary.gender }}</span>
+                <span v-if="q.primary?.temperature_value" class="ps-qc ps-qc--temp">
+                  {{ q.primary.temperature_value.toFixed(1) }}°{{ q.primary.temperature_unit }}
+                </span>
               </div>
-              <div class="ps-qc-row3">
-                <span class="ps-qc-meta">By: {{ item.screener_name ?? 'Officer' }}</span>
-                <span class="ps-qc-meta">Status: {{ item.notification_status }}</span>
-              </div>
-              <div v-if="item.reason_text" class="ps-qc-reason">{{ item.reason_text }}</div>
-
-              <!-- ── CANCELLED REFERRAL NOTE ──
-                   Per business rule: cancelled referrals remain as COMPLETED primary
-                   records with referral_created=1. The primary record is preserved.
-                   This notification shows here as CLOSED — it was open, then cancelled.
-                   The primary screening record remains in the records tab as COMPLETED,
-                   proving the traveler WAS symptomatic and a referral WAS issued.
-              -->
-              <div v-if="item.notification_status === 'CLOSED'" class="ps-qc-cancelled-note">
-                <svg viewBox="0 0 12 12" fill="none" stroke="#78909C" stroke-width="1.4" stroke-linecap="round"><circle cx="6" cy="6" r="4.5"/><line x1="6" y1="4" x2="6" y2="6.5"/><circle cx="6" cy="8.5" r=".5" fill="#78909C"/></svg>
-                Referral cancelled — primary record preserved as COMPLETED (audit)
-              </div>
-            </div>
-
-            <!-- Cancel button — only for OPEN referrals, only by POE-level user -->
-            <div v-if="item.notification_status === 'OPEN' && canCancelReferral" class="ps-qc-actions">
-              <button
-                class="ps-qc-cancel-btn"
-                type="button"
-                :disabled="cancellingId === item.notification_id"
-                aria-label="Cancel this referral"
-                @click="promptCancelReferral(item)"
-              >
-                {{ cancellingId === item.notification_id ? 'Cancelling…' : 'Cancel Referral' }}
-              </button>
             </div>
           </div>
         </div>
+      </div><!-- /queue -->
 
-        <!-- Queue API error -->
-        <div v-if="queueError" class="ps-sync-error" role="alert">
-          <svg viewBox="0 0 16 16" fill="none" stroke="#C62828" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="8" r="6.5"/><line x1="8" y1="5" x2="8" y2="9"/><circle cx="8" cy="11.5" r=".7" fill="#C62828"/></svg>
-          <div><div class="ps-sync-error-title">Queue Error</div><div class="ps-sync-error-sub">{{ queueError }}</div></div>
-          <button class="ps-sync-error-dismiss" type="button" @click="queueError = ''">✕</button>
-        </div>
+    </IonContent><!-- /IonContent -->
 
-        <div style="height: 24px;" aria-hidden="true" />
-      </div><!-- /queue tab -->
-
-    </IonContent>
-
-    <!-- ── VOID MODAL ── -->
-    <IonModal :is-open="voidModalOpen" :can-dismiss="true" @didDismiss="voidModalOpen = false" class="ps-void-modal">
-      <div class="ps-vm-content">
-        <div class="ps-vm-header">
-          <svg viewBox="0 0 18 18" fill="none" stroke="#C62828" stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
-            <path d="M15 5H12L11 4H7L6 5H3M16 5l-.75 10.5a1 1 0 01-1 .5H3.75a1 1 0 01-1-.5L2 5"/>
-          </svg>
-          <span class="ps-vm-title">Void Screening Record</span>
-        </div>
-        <p class="ps-vm-body">This action cannot be undone. The record will be marked VOIDED and any linked OPEN notification will be automatically closed. Linked IN_PROGRESS secondary cases must be closed manually by the secondary officer.</p>
-        <div class="ps-vm-field">
-          <label class="ps-vm-label" for="void-reason">Reason for Voiding <span style="color:#C62828">*</span></label>
-          <textarea
-            id="void-reason"
-            v-model="voidReason"
-            class="ps-vm-textarea"
-            placeholder="Enter a clear reason (minimum 10 characters)…"
-            rows="3"
-            maxlength="255"
-          />
-          <div class="ps-vm-char-count">{{ voidReason.length }}/255</div>
-        </div>
-        <div v-if="voidError" class="ps-vm-error" role="alert">{{ voidError }}</div>
-        <div class="ps-vm-actions">
-          <button class="ps-vm-cancel" type="button" @click="voidModalOpen = false">Cancel</button>
-          <button
-            class="ps-vm-confirm"
-            type="button"
-            :disabled="voidReason.trim().length < 10 || voiding"
-            @click="executeVoid"
-          >
+    <!-- ═══════════════════════════════════════════════════════
+         VOID MODAL
+    ═══════════════════════════════════════════════════════════ -->
+    <IonModal :is-open="showVoid" :breakpoints="[0,1]" :initial-breakpoint="1"
+      @ionModalDidDismiss="showVoid=false; voidReason=''">
+      <IonHeader :translucent="false">
+        <IonToolbar style="--background:linear-gradient(180deg,#070E1B,#0E1A2E);--color:#EDF2FA;--border-width:0;">
+          <IonButtons slot="start"><IonButton @click="showVoid=false" style="--color:rgba(255,255,255,.8);" aria-label="Cancel"><IonIcon :icon="closeOutline"/></IonButton></IonButtons>
+          <IonTitle style="font-family:system-ui,sans-serif;font-weight:700;color:#EDF2FA;">Void Record</IonTitle>
+        </IonToolbar>
+      </IonHeader>
+      <IonContent :scroll-y="true" style="--background:#F8FAFC;--color:#0B1A30;">
+        <div class="ps-void-wrap">
+          <div class="ps-void-warn">
+            <svg viewBox="0 0 16 16" fill="none" stroke="#B45309" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M8 2L1 14h14L8 2z"/><line x1="8" y1="7" x2="8" y2="10"/><circle cx="8" cy="12.5" r=".6" fill="#B45309"/></svg>
+            <div><strong>This cannot be undone.</strong> The record will be permanently voided and linked referrals closed.</div>
+          </div>
+          <label class="ps-void-lbl">Reason <span style="color:#E02050">*</span></label>
+          <textarea v-model="voidReason" class="ps-void-ta" rows="4"
+            placeholder="Minimum 10 characters — describe why this record is voided…"
+            maxlength="500" aria-label="Void reason" aria-required="true"/>
+          <div class="ps-void-meta" :class="voidReason.length > 0 && voidReason.length < 10 && 'ps-void-meta--err'">
+            {{ voidReason.length }}/500 · min 10 chars
+          </div>
+          <button class="ps-void-submit" :disabled="voidReason.trim().length < 10 || voiding" @click="confirmVoid" type="button">
             {{ voiding ? 'Voiding…' : 'Confirm Void' }}
           </button>
         </div>
-      </div>
+      </IonContent>
     </IonModal>
 
-    <!-- ── CANCEL REFERRAL MODAL ── -->
-    <IonModal :is-open="cancelModalOpen" :can-dismiss="true" @didDismiss="cancelModalOpen = false" class="ps-void-modal">
-      <div class="ps-vm-content">
-        <div class="ps-vm-header">
-          <svg viewBox="0 0 18 18" fill="none" stroke="#E65100" stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
-            <path d="M9 2L3 5v5c0 4 3.5 7 6 8 2.5-1 6-4 6-8V5L9 2z"/>
-            <line x1="6" y1="6" x2="12" y2="12"/><line x1="12" y1="6" x2="6" y2="12"/>
-          </svg>
-          <span class="ps-vm-title">Cancel Referral</span>
+    <!-- ═══════════════════════════════════════════════════════
+         RECORD DETAIL MODAL
+    ═══════════════════════════════════════════════════════════ -->
+    <IonModal :is-open="!!selRecord" :breakpoints="[0,1]" :initial-breakpoint="1"
+      @ionModalDidDismiss="selRecord=null">
+      <IonHeader :translucent="false" v-if="selRecord">
+        <IonToolbar style="--background:linear-gradient(180deg,#070E1B,#0E1A2E);--color:#EDF2FA;--border-width:0;">
+          <IonButtons slot="start"><IonButton @click="selRecord=null" style="--color:rgba(255,255,255,.8);" aria-label="Close"><IonIcon :icon="closeOutline"/></IonButton></IonButtons>
+          <IonTitle style="font-family:system-ui,sans-serif;font-weight:700;color:#EDF2FA;">Screening Record</IonTitle>
+        </IonToolbar>
+      </IonHeader>
+      <IonContent :scroll-y="true" v-if="selRecord" style="--background:#F8FAFC;--color:#0B1A30;">
+        <div class="ps-det-wrap">
+          <div class="ps-det-status" :class="selRecord.symptoms_present===1 ? 'ps-det-status--sym' : 'ps-det-status--ok'">
+            <span>{{ selRecord.symptoms_present===1 ? 'Symptomatic — Referral Created' : 'Clear — No Symptoms' }}</span>
+            <span v-if="selRecord.record_status==='VOIDED'" class="ps-det-voided">VOIDED</span>
+          </div>
+          <div class="ps-det-grid">
+            <div class="ps-dg-row"><span class="ps-dk">Direction</span><span class="ps-dv">{{ selRecord.traveler_direction || '—' }}</span></div>
+            <div class="ps-dg-row"><span class="ps-dk">Sex</span><span class="ps-dv">{{ selRecord.gender }}</span></div>
+            <div class="ps-dg-row"><span class="ps-dk">Full Name</span><span class="ps-dv">{{ selRecord.traveler_full_name || '—' }}</span></div>
+            <div class="ps-dg-row"><span class="ps-dk">Temperature</span><span class="ps-dv">{{ selRecord.temperature_value ? selRecord.temperature_value + '°' + selRecord.temperature_unit : 'Not recorded' }}</span></div>
+            <div class="ps-dg-row"><span class="ps-dk">Symptoms</span><span class="ps-dv" :class="selRecord.symptoms_present===1 ? 'ps-dv--red' : 'ps-dv--green'">{{ selRecord.symptoms_present===1 ? 'Present' : 'None detected' }}</span></div>
+            <div class="ps-dg-row"><span class="ps-dk">POE</span><span class="ps-dv">{{ selRecord.poe_code }}</span></div>
+            <div class="ps-dg-row"><span class="ps-dk">Captured</span><span class="ps-dv">{{ fmtDateTime(selRecord.captured_at) }}</span></div>
+            <div class="ps-dg-row"><span class="ps-dk">Sync</span><span class="ps-dv">{{ SYNC.LABELS[selRecord.sync_status] || selRecord.sync_status }}</span></div>
+            <div class="ps-dg-row"><span class="ps-dk">Server ID</span><span class="ps-dv ps-dv--mono">{{ selRecord.id || 'Not synced' }}</span></div>
+            <div v-if="selRecord.void_reason" class="ps-dg-row"><span class="ps-dk">Void Reason</span><span class="ps-dv" style="color:#B45309">{{ selRecord.void_reason }}</span></div>
+          </div>
+          <div v-if="selRecord.record_status !== 'VOIDED'" style="padding:16px 16px 32px;">
+            <button class="ps-det-void-btn" @click="selRecord=null; promptVoidRecord(selRecord)" type="button">
+              Void This Record
+            </button>
+          </div>
         </div>
-        <p class="ps-vm-body">
-          <strong>Important:</strong> Cancelling this referral closes the notification only. The primary screening record remains COMPLETED with <code>referral_created=1</code> as an immutable audit record. The traveler was symptomatic — that fact is preserved permanently.
-        </p>
-        <div class="ps-vm-field">
-          <label class="ps-vm-label" for="cancel-reason">Reason for Cancellation <span style="color:#E65100">*</span></label>
-          <textarea
-            id="cancel-reason"
-            v-model="cancelReason"
-            class="ps-vm-textarea"
-            placeholder="Enter reason for cancelling this referral (minimum 5 characters)…"
-            rows="3"
-            maxlength="255"
-          />
-        </div>
-        <div v-if="cancelError" class="ps-vm-error" role="alert">{{ cancelError }}</div>
-        <div class="ps-vm-actions">
-          <button class="ps-vm-cancel" type="button" @click="cancelModalOpen = false">Back</button>
-          <button
-            class="ps-vm-confirm ps-vm-confirm--orange"
-            type="button"
-            :disabled="cancelReason.trim().length < 5 || cancellingActive"
-            @click="executeCancelReferral"
-          >
-            {{ cancellingActive ? 'Cancelling…' : 'Cancel Referral' }}
-          </button>
-        </div>
-      </div>
+      </IonContent>
     </IonModal>
 
-    <!-- ── DATE FILTER MODAL ── -->
-    <IonModal :is-open="filterModalOpen" :can-dismiss="true" @didDismiss="filterModalOpen = false" class="ps-void-modal">
-      <div class="ps-vm-content">
-        <div class="ps-vm-header">
-          <svg viewBox="0 0 18 18" fill="none" stroke="#1565C0" stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
-            <rect x="2" y="3" width="14" height="13" rx="2"/><line x1="2" y1="8" x2="16" y2="8"/>
-            <line x1="6" y1="1" x2="6" y2="5"/><line x1="12" y1="1" x2="12" y2="5"/>
-          </svg>
-          <span class="ps-vm-title">Filter Records</span>
-        </div>
-
-        <!-- Quick date presets -->
-        <div class="ps-filter-presets">
-          <button v-for="p in datePresets" :key="p.label"
-            class="ps-preset-btn"
-            :class="{ 'ps-preset-btn--active': filterDateLabel === p.label }"
-            type="button"
-            @click="applyFilter(p.date, p.label)">
-            {{ p.label }}
-          </button>
-        </div>
-
-        <!-- Custom date picker -->
-        <div class="ps-vm-field" style="margin-top:14px">
-          <label class="ps-vm-label" for="custom-date">Custom Date</label>
-          <input
-            id="custom-date"
-            type="date"
-            class="ps-date-input"
-            :value="filterDate"
-            :max="new Date().toISOString().slice(0,10)"
-            @change="applyFilter($event.target.value, $event.target.value)"
-          />
-        </div>
-
-        <!-- Symptoms filter -->
-        <div class="ps-vm-field">
-          <label class="ps-vm-label">Symptoms Filter</label>
-          <div class="ps-filter-chips" style="margin:0">
-            <button class="ps-chip" :class="{ 'ps-chip--active': filterSymptoms === 'ALL' }" @click="filterSymptoms = 'ALL'" type="button">All</button>
-            <button class="ps-chip ps-chip--sym" :class="{ 'ps-chip--active': filterSymptoms === 'YES' }" @click="filterSymptoms = 'YES'" type="button">Symptomatic</button>
-            <button class="ps-chip ps-chip--ok"  :class="{ 'ps-chip--active': filterSymptoms === 'NO' }"  @click="filterSymptoms = 'NO'"  type="button">Asymptomatic</button>
+    <!-- ═══════════════════════════════════════════════════════
+         QUEUE DETAIL MODAL
+    ═══════════════════════════════════════════════════════════ -->
+    <IonModal :is-open="!!selQueue" :breakpoints="[0,1]" :initial-breakpoint="1"
+      @ionModalDidDismiss="selQueue=null">
+      <IonHeader :translucent="false" v-if="selQueue">
+        <IonToolbar style="--background:linear-gradient(180deg,#070E1B,#0E1A2E);--color:#EDF2FA;--border-width:0;">
+          <IonButtons slot="start"><IonButton @click="selQueue=null" style="--color:rgba(255,255,255,.8);" aria-label="Close"><IonIcon :icon="closeOutline"/></IonButton></IonButtons>
+          <IonTitle style="font-family:system-ui,sans-serif;font-weight:700;color:#EDF2FA;">Referral Details</IonTitle>
+        </IonToolbar>
+      </IonHeader>
+      <IonContent :scroll-y="true" v-if="selQueue" style="--background:#F8FAFC;--color:#0B1A30;">
+        <div class="ps-det-wrap">
+          <div class="ps-det-status" :class="'ps-det-status--' + (selQueue.priority||'NORMAL').toLowerCase()">
+            {{ selQueue.priority || 'NORMAL' }} PRIORITY · {{ selQueue.status }}
+          </div>
+          <div class="ps-det-grid">
+            <div class="ps-dg-row"><span class="ps-dk">Traveler</span><span class="ps-dv">{{ selQueue.primary?.traveler_full_name || '—' }}</span></div>
+            <div class="ps-dg-row"><span class="ps-dk">Sex</span><span class="ps-dv">{{ selQueue.primary?.gender || '—' }}</span></div>
+            <div class="ps-dg-row"><span class="ps-dk">Direction</span><span class="ps-dv">{{ selQueue.primary?.traveler_direction || '—' }}</span></div>
+            <div class="ps-dg-row"><span class="ps-dk">Temperature</span><span class="ps-dv">{{ selQueue.primary?.temperature_value ? selQueue.primary.temperature_value + '°' + selQueue.primary.temperature_unit : '—' }}</span></div>
+            <div class="ps-dg-row"><span class="ps-dk">Reason</span><span class="ps-dv">{{ selQueue.reason_text || '—' }}</span></div>
+            <div class="ps-dg-row"><span class="ps-dk">Created</span><span class="ps-dv">{{ fmtDateTime(selQueue.created_at) }}</span></div>
+            <div class="ps-dg-row"><span class="ps-dk">Notif ID</span><span class="ps-dv ps-dv--mono">{{ selQueue.id || 'Pending sync' }}</span></div>
           </div>
         </div>
+      </IonContent>
+    </IonModal>
 
-        <!-- Sync filter -->
-        <div class="ps-vm-field">
-          <label class="ps-vm-label">Sync Status</label>
-          <div class="ps-filter-chips" style="margin:0">
-            <button class="ps-chip" :class="{ 'ps-chip--active': filterSync === 'ALL' }"      @click="filterSync = 'ALL'"      type="button">All</button>
-            <button class="ps-chip ps-chip--warn" :class="{ 'ps-chip--active': filterSync === 'UNSYNCED' }" @click="filterSync = 'UNSYNCED'" type="button">Pending</button>
-            <button class="ps-chip ps-chip--ok"  :class="{ 'ps-chip--active': filterSync === 'SYNCED' }"   @click="filterSync = 'SYNCED'"   type="button">Uploaded</button>
+    <!-- Date filter modal -->
+    <IonModal :is-open="filterOpen" :breakpoints="[0,1]" :initial-breakpoint="1"
+      @ionModalDidDismiss="filterOpen=false">
+      <IonHeader :translucent="false">
+        <IonToolbar style="--background:linear-gradient(180deg,#070E1B,#0E1A2E);--color:#EDF2FA;--border-width:0;">
+          <IonButtons slot="start"><IonButton @click="filterOpen=false" style="--color:rgba(255,255,255,.8);" aria-label="Close"><IonIcon :icon="closeOutline"/></IonButton></IonButtons>
+          <IonTitle style="font-family:system-ui,sans-serif;font-weight:700;color:#EDF2FA;">Filter Records</IonTitle>
+        </IonToolbar>
+      </IonHeader>
+      <IonContent :scroll-y="true" style="--background:#F8FAFC;--color:#0B1A30;">
+        <div style="padding:16px;display:flex;flex-direction:column;gap:8px;">
+          <button v-for="p in DATE_PRESETS" :key="p.label"
+            class="ps-date-opt" :class="filterLabel===p.label && 'ps-date-opt--on'"
+            @click="applyDate(p.value, p.label)" type="button">{{ p.label }}</button>
+          <div style="margin-top:8px;">
+            <label style="font-size:11px;font-weight:600;color:#94A3B8;display:block;margin-bottom:6px;text-transform:uppercase;letter-spacing:.6px;">Custom date</label>
+            <input type="date" v-model="customDate" class="ps-date-input"
+              :max="todayISO" @change="applyDate(customDate, customDate)" aria-label="Pick date"/>
           </div>
         </div>
-
-        <div class="ps-vm-actions" style="margin-top:16px">
-          <button class="ps-vm-cancel" type="button" @click="filterModalOpen = false">Close</button>
-          <button class="ps-vm-confirm" type="button" style="background:#1565C0" @click="applyFilter(filterDate, filterDateLabel)">Apply Filters</button>
-        </div>
-      </div>
+      </IonContent>
     </IonModal>
 
   </IonPage>
 </template>
 
+
 <script setup>
 /**
- * ╔══════════════════════════════════════════════════════════════════════════════╗
- * ║  PrimaryScreeningView.vue                                                    ║
- * ║  ECSA-HC POE Sentinel · WHO/IHR 2005 Compliant                             ║
- * ╠══════════════════════════════════════════════════════════════════════════════╣
- * ║  Language: Pure JavaScript (.vue) — NO TypeScript, no type annotations     ║
- * ║  Route:    /PrimaryScreening                                                 ║
- * ║  DB:       poeDB.js (Dexie 4.3.x) — NEVER instantiate Dexie in this file  ║
- * ╠══════════════════════════════════════════════════════════════════════════════╣
- * ║  DEVELOPER LAWS (all enforced here):                                         ║
- * ║    LAW 1 — Navigate with server integer id. Never UUID in route params.     ║
- * ║    LAW 2 — No Authorization Bearer headers. API is open.                   ║
- * ║    LAW 3 — Every IDB record carries id: serverInt as well as client_uuid.   ║
- * ║    LAW 4 — Normalise IDB reads: id = r.id ?? r.server_id ?? null           ║
- * ╠══════════════════════════════════════════════════════════════════════════════╣
- * ║  BUSINESS RULES ENFORCED:                                                    ║
- * ║    • traveler_full_name is OPTIONAL at primary. Never required here.        ║
- * ║    • symptoms_present=1 → atomic dbAtomicWrite([primary, notification])     ║
- * ║    • referral_created=1 stamped only when notification write succeeds       ║
- * ║    • Priority: CRITICAL≥38.5°C, HIGH≥37.5°C, NORMAL=no/unmeasured temp    ║
- * ║    • Cancelled referral: notification→CLOSED, primary stays COMPLETED       ║
- * ║      referral_created=1 is IMMUTABLE — never reset on cancel or void        ║
- * ║    • Void: creator within 24h OR POE_ADMIN/NATIONAL_ADMIN anytime          ║
- * ║    • Void auto-closes linked OPEN notification (not IN_PROGRESS)            ║
- * ║    • Day counter: localStorage APP.DAY_COUNT_DAY_KEY / APP.DAY_COUNT_CNT_KEY║
- * ║    • Sync engine: activeSyncKeys prevents concurrent duplicate uploads      ║
- * ║    • All timers cleared in onUnmounted                                      ║
- * ╚══════════════════════════════════════════════════════════════════════════════╝
+ * PrimaryScreening.vue — Rapid Primary Triage · IHR 2005 Art. 23
+ *
+ * CAPTURE RULES:
+ *   Direction (ENTRY/EXIT/TRANSIT)   → required always
+ *   Sex (MALE/FEMALE)                → required always
+ *   Temperature                      → optional; unit required if given
+ *   Symptoms YES/NO                  → required always (IHR triage decision)
+ *   Traveler Full Name               → required ONLY when symptomatic
+ *
+ * OFFLINE-FIRST:
+ *   All writes → IDB first, network fire-and-forget
+ *   Asymptomatic: dbPut (single store)
+ *   Symptomatic:  dbAtomicWrite([primary, notification]) — never split
+ *   Priority:     CRITICAL ≥38.5°C, HIGH ≥37.5°C, NORMAL otherwise
  */
-
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, computed, nextTick, onMounted, onUnmounted } from 'vue'
 import {
-  IonPage, IonHeader, IonContent, IonModal,
-  toastController, alertController,
+  IonPage, IonHeader, IonToolbar, IonTitle, IonContent, IonButtons,
+  IonBackButton, IonButton, IonIcon, IonModal, IonRefresher,
+  IonRefresherContent, onIonViewDidEnter,
 } from '@ionic/vue'
+import { closeOutline } from 'ionicons/icons'
 import {
-  dbPut, dbGet, dbGetAll, safeDbPut,
-  dbGetByIndex, dbGetRange, dbCountIndex,
-  dbAtomicWrite, dbQuery,
-  genUUID, isoNow, getDeviceId, createRecordBase,
+  dbPut, dbGet, dbGetAll, safeDbPut, dbGetByIndex, dbAtomicWrite,
+  genUUID, isoNow, getDeviceId, getPlatform, createRecordBase,
   STORE, SYNC, APP,
 } from '@/services/poeDB'
 
-// ─── Router ──────────────────────────────────────────────────────────────────
-const router = useRouter()
+// ── CONSTANTS ─────────────────────────────────────────────────────────────
+const PAGE_SIZE = 50
+const todayISO  = new Date().toISOString().slice(0, 10)
 
-// ─── Auth — read FRESH inside every submit handler, never at module level ────
-// The ref below is just for reactive display. The actual auth object is always
-// re-read from sessionStorage inside submit/save handlers.
-const auth = ref({})
-const canScreen = computed(() => !!(
-  auth.value?.is_active &&
-  auth.value?._permissions?.can_do_primary_screening &&
-  auth.value?.poe_code
-))
-const roleLabel = computed(() => ({
-  POE_PRIMARY:         'Primary Officer',
-  POE_SECONDARY:       'Secondary Officer',
-  POE_DATA_OFFICER:    'Data Officer',
-  POE_ADMIN:           'POE Admin',
-  DISTRICT_SUPERVISOR: 'District Supervisor',
-  PHEOC_OFFICER:       'PHEOC Officer',
-  NATIONAL_ADMIN:      'National Admin',
-}[auth.value?.role_key] ?? auth.value?.role_key ?? ''))
-
-const canCancelReferral = computed(() => {
-  const rk = auth.value?.role_key
-  return ['POE_PRIMARY', 'POE_ADMIN', 'POE_SECONDARY', 'NATIONAL_ADMIN'].includes(rk)
-})
-
-// ─── Connectivity ─────────────────────────────────────────────────────────────
-const isOnline = ref(navigator.onLine)
-
-// ─── WHO/IHR symptom reference list (display only — not stored) ──────────────
-const syrefOpen = ref(false)
-const WHO_SYMPTOMS = [
-  'Fever (history or measured)', 'Persistent fever', 'Cough',
-  'Shortness of breath', 'Vomiting', 'Diarrhea', 'Skin rash',
-  'Unexplained bleeding', 'Severe headache', 'Joint pain',
-  'Muscle pain', 'General weakness / fatigue',
-  'Altered consciousness or neurological signs', 'Jaundice',
+const DIRS = [
+  { v:'ENTRY',   k:'entry',   label:'→ Entry' },
+  { v:'EXIT',    k:'exit',    label:'← Exit'  },
+  { v:'TRANSIT', k:'transit', label:'⇌ Transit'},
 ]
 
-// ─── Tab state ────────────────────────────────────────────────────────────────
-const showTab = ref('capture')
-
-// ─── Gender options — MALE/FEMALE only per operational requirement
-// OTHER and UNKNOWN still valid DB values but not shown at primary capture
-const GENDERS = [
-  {
-    value: 'MALE',
-    label: 'Male',
-    svg: `<svg viewBox="0 0 16 16" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round"><circle cx="7" cy="7" r="4"/><line x1="10" y1="4" x2="14" y2="0"/><polyline points="11 0 14 0 14 3"/></svg>`,
-  },
-  {
-    value: 'FEMALE',
-    label: 'Female',
-    svg: `<svg viewBox="0 0 16 16" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round"><circle cx="8" cy="6" r="4"/><line x1="8" y1="10" x2="8" y2="15"/><line x1="5.5" y1="13" x2="10.5" y2="13"/></svg>`,
-  },
+// ── IHR/WHO OBSERVABLE SYMPTOM CATEGORIES ────────────────────────────────
+// Aligned to IHR 2005 Annex 2 + WHO Integrated Disease Surveillance.
+// These are symptoms observable during rapid visual triage at a POE —
+// no lab equipment, no examination table. Officers confirm YES/NO only.
+// Coverage: VHF, Cholera, Plague, SARI, ILI, AWD, Meningitis, Mpox,
+//           Yellow Fever, Rift Valley Fever, Marburg, Ebola, CCHF,
+//           Lassa, Polio, Measles, Rubella, Diphtheria, Anthrax.
+const WHO_CATS = [
+  { name:'Respiratory (ILI/SARI)',  items:['Fever ≥38°C','Cough','Difficulty breathing','Sore throat','Runny nose'] },
+  { name:'Gastrointestinal (AWD)',  items:['Vomiting','Watery diarrhoea','Bloody diarrhoea','Abdominal pain','Dehydration signs'] },
+  { name:'Haemorrhagic (VHF)',      items:['Unexplained bleeding','Bloody stool','Bleeding gums','Blood in vomit','Bruising/petechiae'] },
+  { name:'Neurological',            items:['Altered consciousness','Seizures','Neck stiffness','Paralysis/weakness','Severe headache'] },
+  { name:'Skin / Mucosal',          items:['Rash','Jaundice (yellow eyes)','Skin lesions/vesicles','Swollen lymph nodes','Conjunctivitis (red eyes)'] },
+  { name:'Systemic / General',      items:['Severe fatigue/prostration','Night sweats','Muscle/joint pain','Significant weight loss','Swelling (face/limbs)'] },
 ]
 
-// ─── Form state ───────────────────────────────────────────────────────────────
-const defaultForm = () => ({
-  gender:             null,     // 'MALE'|'FEMALE'|'OTHER'|'UNKNOWN'
-  traveler_full_name: '',       // Optional at primary. Max 150 chars.
-  temperature_raw:    '',       // Raw input string — parsed to float on save
-  symptoms_present:   null,     // 0 or 1
-})
-const form       = ref(defaultForm())
-const focusName  = ref(false)
-const focusTemp  = ref(false)
-const tempUnit   = ref('C')    // 'C' or 'F'
-const fieldErrors = ref({})    // { gender, temperature, symptoms }
+const DATE_PRESETS = [
+  { label:'Today',     value: todayISO },
+  { label:'Yesterday', value: new Date(Date.now()-86400000).toISOString().slice(0,10) },
+  { label:'Last 7 days', value: new Date(Date.now()-7*86400000).toISOString().slice(0,10) },
+]
 
-// ─── Temperature computed helpers ─────────────────────────────────────────────
-const tempValueFloat = computed(() => {
-  const v = parseFloat(form.value.temperature_raw)
-  return isNaN(v) ? null : v
+// ── STATE ─────────────────────────────────────────────────────────────────
+const auth      = ref(null)
+const tab       = ref('capture')
+const isOnline  = ref(navigator.onLine)
+const nameRef   = ref(null)
+const focusTemp = ref(false)
+const focusName = ref(false)
+const whoOpen   = ref(false)
+const tempUnit  = ref('C')
+const capturing = ref(false)
+const lastResult = ref(null)
+const syncing   = ref(false)
+const syncError = ref('')
+
+// Stats (computed from IDB — dbCountIndex not available, use indexed query)
+const todayCount   = ref(0)
+const symptomCount = ref(0)
+const syncedCount  = ref(0)
+const pendingCount = ref(0)
+const openReferrals = ref(0)
+
+// Records tab
+const records      = ref([])
+const recLoading   = ref(false)
+const recordsTotal = ref(0)
+const page         = ref(0)
+const fSym         = ref('ALL')
+const fSync        = ref('ALL')
+const fDir         = ref('ALL')
+const filterDate   = ref(todayISO)
+const filterLabel  = ref('Today')
+const filterOpen   = ref(false)
+const customDate   = ref('')
+
+// Queue tab
+const queue    = ref([])
+const qLoading = ref(false)
+const qFilter  = ref('OPEN')
+
+// Modals
+const showVoid   = ref(false)
+const voiding    = ref(false)
+const voidReason = ref('')
+const voidTarget = ref(null)
+const selRecord  = ref(null)
+const selQueue   = ref(null)
+
+// Form
+const mkForm = () => ({
+  direction:  null,
+  gender:     null,
+  temp:       '',
+  symptoms:   null,
+  name:       '',
+})
+const form   = ref(mkForm())
+const errors = ref({})
+
+// Sync
+const activeSyncKeys = new Set()
+let   syncTimer      = null
+
+// ── COMPUTED ──────────────────────────────────────────────────────────────
+const canScreen = computed(() => {
+  const a = auth.value
+  return !!(a?.id && a?.is_active && a?._permissions?.can_do_primary_screening && a?.poe_code)
 })
 
-const tempInCelsius = computed(() => {
-  if (tempValueFloat.value === null) return null
-  return tempUnit.value === 'F'
-    ? (tempValueFloat.value - 32) * 5 / 9
-    : tempValueFloat.value
+const tempC = computed(() => {
+  const v = parseFloat(form.value.temp)
+  if (isNaN(v)) return null
+  return tempUnit.value === 'F' ? (v - 32) * 5 / 9 : v
 })
 
-/** Level: 'normal' | 'warn' | 'danger' | '' */
-const tempWarningLevel = computed(() => {
-  const c = tempInCelsius.value
-  if (c === null) return ''
-  if (c >= 38.5) return 'danger'
+const tempLevel = computed(() => {
+  const c = tempC.value
+  if (c === null) return null
+  if (c >= 38.5) return 'crit'
   if (c >= 37.5) return 'warn'
-  if (c >= 35.0 && c < 37.5) return 'normal'
-  return 'warn' // below 35 also warn (hypothermia)
+  return 'normal'
 })
 
-const tempWarning = computed(() => {
-  const c = tempInCelsius.value
-  const v = tempValueFloat.value
-  if (c === null || v === null) return ''
-  const t = `${v.toFixed(1)}°${tempUnit.value}`
-  if (c >= 38.5) return `High fever (${t}) · Priority: CRITICAL · Referral will be CRITICAL priority`
-  if (c >= 37.5) return `Fever (${t}) · Priority: HIGH · Referral will be HIGH priority if symptoms present`
-  if (c >= 35.0) return `Normal range (${t}) · ${c.toFixed(1) >= 37.0 ? 'Low-grade — document' : 'Normal'}`
-  return `Hypothermia risk (${t}) · Verify thermometer reading`
-})
-
-const tempWarningIcon = computed(() => {
-  if (tempWarningLevel.value === 'danger')
-    return `<svg viewBox="0 0 14 14" fill="none" stroke="#B71C1C" stroke-width="1.8" stroke-linecap="round"><path d="M7 1L1 12h12L7 1z"/><line x1="7" y1="5.5" x2="7" y2="8"/><circle cx="7" cy="10" r=".6" fill="#B71C1C"/></svg>`
-  if (tempWarningLevel.value === 'warn')
-    return `<svg viewBox="0 0 14 14" fill="none" stroke="#E65100" stroke-width="1.8" stroke-linecap="round"><path d="M7 1L1 12h12L7 1z"/><line x1="7" y1="5.5" x2="7" y2="8"/><circle cx="7" cy="10" r=".6" fill="#E65100"/></svg>`
-  return `<svg viewBox="0 0 14 14" fill="none" stroke="#2E7D32" stroke-width="1.8" stroke-linecap="round"><polyline points="2 7 5.5 10.5 12 3"/></svg>`
-})
-
-/** Position of thumb on the temperature scale bar (0–100%) */
-const tempScalePercent = computed(() => {
-  const c = tempInCelsius.value
-  if (c === null) return 50
-  const MIN_C = 25, MAX_C = 45
-  return Math.max(0, Math.min(100, ((c - MIN_C) / (MAX_C - MIN_C)) * 100))
-})
-
-/** Calculated notification priority based on temp+symptoms */
-const referralPriority = computed(() => {
-  if (form.value.symptoms_present !== 1) return 'NORMAL'
-  const c = tempInCelsius.value
-  if (c === null) return 'NORMAL'
-  if (c >= 38.5) return 'CRITICAL'
-  if (c >= 37.5) return 'HIGH'
+const priority = computed(() => {
+  if (form.value.symptoms !== 1) return 'NORMAL'
+  const c = tempC.value
+  if (c !== null && c >= 38.5) return 'CRITICAL'
+  if (c !== null && c >= 37.5) return 'HIGH'
   return 'NORMAL'
 })
 
-// ─── Capture readiness ────────────────────────────────────────────────────────
-const canCapture = computed(() =>
-  canScreen.value &&
-  form.value.gender !== null &&
-  form.value.symptoms_present !== null &&
-  !fieldErrors.value.temperature
-)
+const priorityReason = computed(() => {
+  if (priority.value === 'CRITICAL') return `≥38.5°C with symptoms detected`
+  if (priority.value === 'HIGH')     return `≥37.5°C with symptoms detected`
+  return 'Symptoms present — no elevated temperature'
+})
+
+const canCapture = computed(() => {
+  if (!canScreen.value) return false
+  if (!form.value.direction) return false
+  if (!form.value.gender) return false
+  if (form.value.symptoms === null) return false
+  if (form.value.symptoms === 1 && form.value.name.trim().length < 2) return false
+  if (errors.value.temp) return false
+  // Clinical guard: block fever + clear contradiction
+  const c = tempC.value
+  if (c !== null && c >= 38.0 && form.value.symptoms === 0) return false
+  if (captureLocked.value) return false
+  return true
+})
 
 const captureHint = computed(() => {
-  if (!canScreen.value) return 'You do not have permission to screen at this POE'
-  if (form.value.gender === null) return 'Select a gender to continue'
-  if (form.value.symptoms_present === null) return 'Confirm symptoms decision to continue'
-  if (fieldErrors.value.temperature) return fieldErrors.value.temperature
+  if (!canScreen.value) return 'No permission to screen at this POE'
+  if (!form.value.direction) return 'Select traveler direction'
+  if (!form.value.gender) return 'Select sex'
+  if (form.value.symptoms === null) return 'Confirm symptoms decision'
+  // Clinical guard hint
+  const c = tempC.value
+  if (c !== null && c >= 38.0 && form.value.symptoms === 0)
+    return 'Fever detected — mark Symptomatic or clear temperature'
+  if (form.value.symptoms === 1 && form.value.name.trim().length < 2) return 'Enter traveler name for referral traceability'
+  if (errors.value.temp) return errors.value.temp
+  if (captureLocked.value) return 'Record saved — please wait…'
   return ''
 })
 
-// ─── Filter state for records tab ────────────────────────────────────────────
-const filterModalOpen  = ref(false)
-const filterDate       = ref(new Date().toISOString().slice(0, 10))  // YYYY-MM-DD
-const filterDateLabel  = ref('Today')
-const recordsPage      = ref(0)       // current page index (0-based)
-const RECORDS_PER_PAGE = 50           // virtual pagination — load 50 at a time
-const recordsTotal     = ref(0)       // total count after filter
-const filterSymptoms   = ref('ALL')   // 'ALL' | 'YES' | 'NO'
-const filterSync       = ref('ALL')   // 'ALL' | 'UNSYNCED' | 'SYNCED' | 'FAILED'
+// ── LIFECYCLE ─────────────────────────────────────────────────────────────
+onMounted(async () => {
+  auth.value = getAuth()
+  window.addEventListener('online',  onOnline)
+  window.addEventListener('offline', onOffline)
+  await loadStats()
+  if (pendingCount.value > 0 && isOnline.value) void manualSync()
+})
+onIonViewDidEnter(async () => {
+  auth.value = getAuth()
+  await nextTick()
+  await loadStats()
+})
+onUnmounted(() => {
+  clearTimeout(syncTimer)
+  clearTimeout(captureDebounceTimer)
+  window.removeEventListener('online',  onOnline)
+  window.removeEventListener('offline', onOffline)
+})
 
-// ─── Queue filter state ───────────────────────────────────────────────────────
-const queueStatusFilter = ref('OPEN') // 'OPEN' | 'ALL' — default OPEN only
+function getAuth() {
+  try { return JSON.parse(sessionStorage.getItem('AUTH_DATA') ?? 'null') }
+  catch { return null }
+}
+function onOnline()  { isOnline.value = true;  if (pendingCount.value > 0) void manualSync() }
+function onOffline() { isOnline.value = false }
 
-// ─── Stats ────────────────────────────────────────────────────────────────────
-const todayCount       = ref(0)
-const symptomaticCount = ref(0)
-const syncedCount      = ref(0)
-const pendingSyncCount = ref(0)
-const openReferrals    = ref(0)
+function setTab(t) {
+  tab.value = t
+  if (t === 'records') loadRecords()
+  if (t === 'queue')   loadQueue()
+}
 
+// ── STATS ─────────────────────────────────────────────────────────────────
 async function loadStats() {
   try {
-    const today = new Date().toISOString().slice(0, 10)
-    const all   = await dbGetByIndex(STORE.PRIMARY_SCREENINGS, 'poe_code', auth.value?.poe_code ?? '')
-
-    const todayRecs = all.filter(r =>
-      r.record_status !== 'VOIDED' &&
-      (r.captured_at ?? r.created_at ?? '').startsWith(today)
-    )
-    todayCount.value       = todayRecs.length
-    symptomaticCount.value = todayRecs.filter(r => r.symptoms_present === 1).length
-
-    // ALL time (not just today) pending sync
-    pendingSyncCount.value = all.filter(r => r.sync_status === SYNC.UNSYNCED).length
-    syncedCount.value      = todayRecs.filter(r => r.sync_status === SYNC.SYNCED).length
-
-    // Open referrals — from notifications store
-    const notifs = await dbGetByIndex(STORE.NOTIFICATIONS, 'poe_code', auth.value?.poe_code ?? '')
+    const a = getAuth()
+    if (!a?.poe_code) return
+    const all = await dbGetByIndex(STORE.PRIMARY_SCREENINGS, 'poe_code', a.poe_code)
+    const today = all.filter(r => r.record_status !== 'VOIDED' && (r.captured_at||'').startsWith(todayISO))
+    todayCount.value   = today.length
+    symptomCount.value = today.filter(r => r.symptoms_present === 1).length
+    syncedCount.value  = today.filter(r => r.sync_status === SYNC.SYNCED).length
+    pendingCount.value = all.filter(r => r.sync_status === SYNC.UNSYNCED || r.sync_status === SYNC.FAILED).length
+    const notifs = await dbGetByIndex(STORE.NOTIFICATIONS, 'poe_code', a.poe_code)
     openReferrals.value = notifs.filter(n => n.status === 'OPEN').length
-  } catch (e) {
-    console.warn('[PrimaryScreening] loadStats error', e)
+  } catch (e) { console.warn('[PS] loadStats', e) }
+}
+
+// ── VALIDATION ────────────────────────────────────────────────────────────
+function clearE(f) {
+  const e = { ...errors.value }
+  delete e[f]
+  errors.value = e
+}
+
+// ── HUMAN BODY TEMPERATURE LIMITS ─────────────────────────────────────────
+const TEMP_LIMITS = {
+  C: { min: 30.0, max: 43.0 },
+  F: { min: 86.0, max: 109.4 },
+}
+
+// SOFT — runs on every keystroke. Never wipes. Only shows warnings.
+// Lets the user type freely (e.g. "3" → "38" → "38.5").
+function validateTempSoft() {
+  const raw = form.value.temp
+  const e = { ...errors.value }
+  delete e.temp; delete e.tempWarn
+  if (!raw && raw !== 0) { errors.value = e; return }
+
+  const v = parseFloat(raw)
+  if (isNaN(v)) { errors.value = e; return }
+
+  // Only show advisory once a plausible complete value is entered (2+ digits)
+  if (String(raw).replace(/[^0-9]/g, '').length >= 2) {
+    const c = tempUnit.value === 'F' ? (v - 32) * 5 / 9 : v
+    if (c >= 38.5 && form.value.symptoms === 0) {
+      e.tempWarn = 'Fever ≥38.5°C IS a clinical symptom. Mark "Symptomatic" or clear temperature.'
+    } else if (c < 35 && c >= 30) {
+      e.tempWarn = 'Hypothermia (<35°C) — unusual for a walking traveler. Verify reading.'
+    }
   }
+  errors.value = e
 }
 
-// ─── Day counter (localStorage) ───────────────────────────────────────────────
-function incrementDayCounter() {
-  const today    = new Date().toISOString().slice(0, 10)
-  const storedDay = localStorage.getItem(APP.DAY_COUNT_DAY_KEY)
-  if (storedDay !== today) {
-    localStorage.setItem(APP.DAY_COUNT_DAY_KEY, today)
-    localStorage.setItem(APP.DAY_COUNT_CNT_KEY, '0')
-  }
-  const cnt = parseInt(localStorage.getItem(APP.DAY_COUNT_CNT_KEY) || '0') + 1
-  localStorage.setItem(APP.DAY_COUNT_CNT_KEY, String(cnt))
-}
-
-// ─── Field validation ─────────────────────────────────────────────────────────
-function clearFieldError(field) {
-  const errs = { ...fieldErrors.value }
-  delete errs[field]
-  fieldErrors.value = errs
-}
-
+// HARD — runs on blur (user finished typing). Wipes impossible values.
 function validateTemp() {
-  const v = parseFloat(form.value.temperature_raw)
-  const errs = { ...fieldErrors.value }
-  delete errs.temperature
+  const raw = form.value.temp
+  const e = { ...errors.value }
+  delete e.temp; delete e.tempWarn
+  if (!raw && raw !== 0) { errors.value = e; return true }
 
-  if (form.value.temperature_raw === '' || form.value.temperature_raw === null) {
-    fieldErrors.value = errs
-    return true
-  }
+  const v = parseFloat(raw)
   if (isNaN(v)) {
-    errs.temperature = 'Temperature must be a valid number.'
-    fieldErrors.value = errs
-    return false
+    form.value.temp = ''
+    e.temp = 'Not a valid number — cleared.'
+    errors.value = e; return false
   }
-  const minC = 25, maxC = 45, minF = 77, maxF = 113
-  if (tempUnit.value === 'C' && (v < minC || v > maxC)) {
-    errs.temperature = `Temperature out of clinical range (${minC}–${maxC}°C). Verify thermometer.`
-    fieldErrors.value = errs
-    return false
+
+  const lim = TEMP_LIMITS[tempUnit.value]
+
+  // ── HARD BLOCK: outside survivable clinical range → wipe ────────────────
+  if (v < lim.min) {
+    form.value.temp = ''
+    e.temp = `${v}°${tempUnit.value} is below survivable body temp (min ${lim.min}°${tempUnit.value}). Cleared.`
+    errors.value = e; return false
   }
-  if (tempUnit.value === 'F' && (v < minF || v > maxF)) {
-    errs.temperature = `Temperature out of clinical range (${minF}–${maxF}°F). Verify thermometer.`
-    fieldErrors.value = errs
-    return false
+  if (v > lim.max) {
+    form.value.temp = ''
+    e.temp = `${v}°${tempUnit.value} exceeds survivable limit (max ${lim.max}°${tempUnit.value}). Cleared.`
+    errors.value = e; return false
   }
-  fieldErrors.value = errs
-  return true
+
+  // ── CLINICAL ADVISORY (non-blocking) ───────────────────────────────────
+  const c = tempUnit.value === 'F' ? (v - 32) * 5 / 9 : v
+  if (c >= 38.5 && form.value.symptoms === 0) {
+    e.tempWarn = 'Fever ≥38.5°C IS a clinical symptom. Mark "Symptomatic" or clear temperature.'
+  } else if (c < 35) {
+    e.tempWarn = 'Hypothermia (<35°C) — unusual for a walking traveler. Verify reading.'
+  }
+
+  errors.value = e; return true
 }
+
+// ── FEVER AUTO-REFERRAL GUARD ─────────────────────────────────────────────
+// If temperature ≥ 38.0°C is entered, fever is clinically a symptom by definition.
+// The officer MUST acknowledge this is a symptomatic case or explicitly clear the temp.
+// This prevents data corruption where fever cases slip through as "clear".
+const feverAutoGuard = computed(() => {
+  const c = tempC.value
+  if (c === null) return null
+  if (c >= 38.0 && form.value.symptoms === 0) {
+    return 'Fever ≥38°C detected. Fever is a clinical symptom — this traveler should be marked Symptomatic or temperature should be cleared.'
+  }
+  return null
+})
 
 function validateForm() {
-  const errs = {}
-  if (!form.value.gender) {
-    errs.gender = 'Gender is required — IHR Annex 1B requires all travelers to be counted.'
+  const e = {}
+  if (!form.value.direction) e.direction = 'Required'
+  if (!form.value.gender) e.gender = 'Required'
+  if (form.value.symptoms === null) e.symptoms = 'Required — IHR triage decision'
+  if (form.value.symptoms === 1 && form.value.name.trim().length < 2)
+    e.name = 'Full name required for referral traceability (WHO IHR Art. 23)'
+
+  // ── CLINICAL GUARD: fever + "no symptoms" is a data integrity violation ──
+  // A fever reading IS a symptom. Block saving until officer resolves contradiction.
+  const c = tempC.value
+  if (c !== null && c >= 38.0 && form.value.symptoms === 0) {
+    e.symptoms = 'Fever ≥38°C detected — fever is a symptom. Mark "Symptomatic" or clear the temperature.'
   }
-  if (form.value.symptoms_present === null) {
-    errs.symptoms = 'Symptoms decision is required — this is the IHR triage decision.'
+
+  // ── CLINICAL GUARD: hypothermia + "no symptoms" advisory ──────────────
+  if (c !== null && c < 35.0 && c >= 30 && form.value.symptoms === 0) {
+    e.tempWarn = 'Hypothermia (<35°C) in a walking traveler is unusual. Consider rechecking.'
   }
-  // Temperature unit required if value provided
-  const tempRaw = form.value.temperature_raw
-  if (tempRaw !== '' && tempRaw !== null) {
-    if (!validateTemp()) {
-      // error already set in fieldErrors by validateTemp()
-    }
-  }
-  fieldErrors.value = { ...fieldErrors.value, ...errs }
-  return Object.keys(fieldErrors.value).length === 0
+
+  if (!validateTemp() && errors.value.temp) e.temp = errors.value.temp
+  errors.value = { ...errors.value, ...e }
+  // Only block on hard errors (not tempWarn which is advisory)
+  return !e.direction && !e.gender && !e.symptoms && !e.name && !e.temp
 }
 
-function switchTempUnit(unit) {
-  if (tempUnit.value === unit) return
-  const current = parseFloat(form.value.temperature_raw)
-  if (!isNaN(current)) {
-    if (unit === 'F') {
-      form.value.temperature_raw = ((current * 9 / 5) + 32).toFixed(1)
-    } else {
-      form.value.temperature_raw = ((current - 32) * 5 / 9).toFixed(1)
-    }
+function switchUnit(u) {
+  if (tempUnit.value === u) return
+  const v = parseFloat(form.value.temp)
+  if (!isNaN(v)) {
+    form.value.temp = u === 'F' ? ((v*9/5)+32).toFixed(1) : ((v-32)*5/9).toFixed(1)
   }
-  tempUnit.value = unit
+  tempUnit.value = u
   validateTemp()
 }
 
-function clearTemp() {
-  form.value.temperature_raw = ''
-  clearFieldError('temperature')
-}
+// ── ANTI-CORRUPTION: Double-capture debounce ─────────────────────────────
+// Prevents rapid double-taps from creating duplicate records.
+// Once a capture starts, the button is locked for 2 seconds AFTER completion.
+let captureDebounceTimer = null
+const captureLocked = ref(false)
 
-// ─── Capturing ────────────────────────────────────────────────────────────────
-const capturing  = ref(false)
-const lastResult = ref(null) // the just-saved primary screening record
-
+// ── CAPTURE ───────────────────────────────────────────────────────────────
 async function captureScreening() {
-  if (capturing.value || !canCapture.value) return
-
-  // Validate
+  if (capturing.value || captureLocked.value || !canCapture.value) return
   if (!validateForm()) {
-    // Scroll to first error
-    const firstErr = document.querySelector('.ps-field-error')
-    firstErr?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    // Focus first error field
+    if (errors.value.name) nameRef.value?.focus()
     return
   }
 
-  // Re-read auth FRESH — never use module-level cache for record stamping
-  const freshAuth = JSON.parse(sessionStorage.getItem('AUTH_DATA') ?? 'null') ?? {}
+  const freshAuth = getAuth()
   if (!freshAuth?.id || !freshAuth?.is_active) {
-    const t = await toastController.create({ message: 'Session expired. Please log in again.', duration: 3000, color: 'danger' })
-    void t.present()
+    syncError.value = 'Session expired — log in again'
     return
   }
   if (!freshAuth?._permissions?.can_do_primary_screening || !freshAuth?.poe_code) {
-    const t = await toastController.create({ message: 'You do not have permission to screen at this POE.', duration: 3000, color: 'danger' })
-    void t.present()
+    syncError.value = 'No permission to screen at this POE'
     return
   }
 
   capturing.value = true
-
   try {
-    const now           = isoNow()
-    const symptomatic   = form.value.symptoms_present === 1
-    const tempValue     = form.value.temperature_raw !== '' ? parseFloat(form.value.temperature_raw) : null
-    const tempUnitVal   = tempValue !== null ? tempUnit.value : null
-    const travelerName  = form.value.traveler_full_name.trim() || null
+    const now         = isoNow()
+    const symptomatic = form.value.symptoms === 1
+    const tempVal     = form.value.temp !== '' ? parseFloat(form.value.temp) : null
+    const tempUnitVal = tempVal !== null ? tempUnit.value : null
+    const tname       = form.value.name.trim() || null
 
-    // ── Build primary screening record ──────────────────────────────────────
     const screeningUuid = genUUID()
     const screening = createRecordBase(freshAuth, {
-      gender:                 form.value.gender,
-      traveler_full_name:     travelerName,
-      temperature_value:      tempValue,
-      temperature_unit:       tempUnitVal,
-      symptoms_present:       symptomatic ? 1 : 0,
-      captured_at:            now,
-      captured_timezone:      Intl.DateTimeFormat().resolvedOptions().timeZone,
-      referral_created:       0,           // will be set to 1 atomically if symptomatic
-      record_status:          'COMPLETED',
-      void_reason:            null,
-      deleted_at:             null,
+      traveler_direction:  form.value.direction,
+      gender:              form.value.gender,
+      traveler_full_name:  tname,
+      temperature_value:   tempVal,
+      temperature_unit:    tempUnitVal,
+      symptoms_present:    symptomatic ? 1 : 0,
+      captured_at:         now,
+      captured_timezone:   Intl.DateTimeFormat().resolvedOptions().timeZone,
+      referral_created:    0,
+      record_status:       'COMPLETED',
+      void_reason:         null,
     })
-    // Dexie keyPath override — createRecordBase generates its own uuid but we
-    // want a known uuid for the atomic write pair
     screening.client_uuid = screeningUuid
 
     if (!symptomatic) {
-      // ── PATH A: ASYMPTOMATIC — single write ──────────────────────────────
       await dbPut(STORE.PRIMARY_SCREENINGS, screening)
-      incrementDayCounter()
+      incrementDay()
       lastResult.value = { ...screening }
-      resetFormKeepStats()
+      resetFormKeepUnit()
       await loadStats()
       void attemptSync(screeningUuid)
       return
     }
 
-    // ── PATH B: SYMPTOMATIC — atomic write (primary + notification) ─────────
-    // Both must succeed or both roll back. Never a half-written state.
-
-    const priority = referralPriority.value
-
-    // Build the reason_text the secondary officer sees in their queue
-    const tempSummary = tempValue !== null ? `${tempValue.toFixed(1)}°${tempUnitVal}` : 'Not measured'
-    const reasonText  = [
+    // SYMPTOMATIC — atomic write
+    const pri   = priority.value
+    const tsum  = tempVal !== null ? `${tempVal.toFixed(1)}°${tempUnitVal}` : 'Not measured'
+    const rtext = [
       `Symptoms present.`,
-      `Gender: ${form.value.gender}.`,
-      `Temp: ${tempSummary}.`,
-      `Priority: ${priority}.`,
-      travelerName ? `Traveler: ${travelerName}.` : null,
+      `Direction: ${form.value.direction}.`,
+      `Sex: ${form.value.gender}.`,
+      `Temp: ${tsum}.`,
+      `Priority: ${pri}.`,
+      `Traveler: ${tname || '—'}.`,
       `POE: ${freshAuth.poe_code}.`,
-      `District: ${freshAuth.district_code ?? '—'}.`,
-      `PHEOC: ${freshAuth.pheoc_code ?? '—'}.`,
-      `Officer: ${freshAuth.full_name ?? freshAuth.username ?? 'Officer'}.`,
-    ].filter(Boolean).join(' ')
+      `Officer: ${freshAuth.full_name || freshAuth.username || 'Officer'}.`,
+    ].join(' ')
 
     const notifUuid = genUUID()
-    const notification = {
+    const notif = {
       client_uuid:            notifUuid,
-      server_id:              null,
-      server_received_at:     null,
-      idempotency_key:        null,
       reference_data_version: APP.REFERENCE_DATA_VER,
-      country_code:           freshAuth.country_code  ?? null,
-      province_code:          freshAuth.province_code ?? null,
-      pheoc_code:             freshAuth.pheoc_code    ?? null,
-      district_code:          freshAuth.district_code ?? null,
-      poe_code:               freshAuth.poe_code      ?? null,
-      primary_screening_id:   screeningUuid,          // client_uuid link (resolved to int after sync)
+      country_code:           freshAuth.country_code  || null,
+      province_code:          freshAuth.province_code || null,
+      pheoc_code:             freshAuth.pheoc_code    || null,
+      district_code:          freshAuth.district_code || null,
+      poe_code:               freshAuth.poe_code      || null,
+      primary_screening_id:   screeningUuid,
+      primary_uuid:           screeningUuid,
       created_by_user_id:     freshAuth.id,
       notification_type:      'SECONDARY_REFERRAL',
       status:                 'OPEN',
-      priority:               priority,
+      priority:               pri,
       reason_code:            'PRIMARY_SYMPTOMS_DETECTED',
-      reason_text:            reasonText,
-      assigned_role_key:      'POE_SECONDARY',
+      reason_text:            rtext,
+      assigned_role_key:      'SCREENER',
       assigned_user_id:       null,
       opened_at:              null,
       closed_at:              null,
       device_id:              getDeviceId(),
       app_version:            APP.VERSION,
-      platform:               screening.platform,
+      platform:               getPlatform(),
       record_version:         1,
-      deleted_at:             null,
       sync_status:            SYNC.UNSYNCED,
       synced_at:              null,
       sync_attempt_count:     0,
       last_sync_error:        null,
-      sync_note:              null,
       created_at:             now,
       updated_at:             now,
+      // ── Enrichment fields — travel + clinical data for NotificationsCenter ──
+      // Without these, the referral queue shows "Anonymous" and has no temp context.
+      gender:                 form.value.gender,
+      traveler_full_name:     tname,
+      traveler_direction:     form.value.direction,
+      temperature_value:      tempVal,
+      temperature_unit:       tempUnitVal,
+      captured_at:            now,
+      screener_name:          freshAuth.full_name || freshAuth.username || null,
     }
 
-    // Stamp referral_created BEFORE atomic write
-    const screeningWithReferral = { ...screening, referral_created: 1 }
+    const screeningWithRef = { ...screening, referral_created: 1 }
 
-    // ── ATOMIC WRITE — both or neither ──────────────────────────────────────
+    // dbAtomicWrite — both or neither
     await dbAtomicWrite([
-      { store: STORE.PRIMARY_SCREENINGS, record: screeningWithReferral },
-      { store: STORE.NOTIFICATIONS,      record: notification },
+      { store: STORE.PRIMARY_SCREENINGS, record: screeningWithRef },
+      { store: STORE.NOTIFICATIONS,      record: notif },
     ])
 
-    incrementDayCounter()
-    lastResult.value = { ...screeningWithReferral, notification: { ...notification } }
-    resetFormKeepStats()
+    incrementDay()
+    lastResult.value = { ...screeningWithRef, notification: { ...notif } }
+    resetFormKeepUnit()
     await loadStats()
-
-    // Attempt to sync both together
     void attemptSyncPair(screeningUuid, notifUuid)
 
   } catch (err) {
-    console.error('[PrimaryScreening] captureScreening error', err)
-    const t = await toastController.create({
-      message: `Save failed: ${err?.message ?? 'Unknown error'}. Record NOT saved. Try again.`,
-      duration: 5000,
-      color:    'danger',
-    })
-    void t.present()
-    // Log full error for developer
-    console.group('%c[PrimaryScreening] CAPTURE ERROR — FULL DETAIL', 'color:#DC3545;font-weight:700')
-    console.error('Error class:', err?.constructor?.name)
-    console.error('Message:', err?.message)
-    console.error('Stack:', err?.stack)
-    console.groupEnd()
+    console.error('[PS] captureScreening', err)
+    syncError.value = `Save failed: ${err?.message || 'Unknown'}. NOT saved — retry.`
   } finally {
     capturing.value = false
+    // Anti-corruption: lock button for 1.5s after capture to prevent double-tap
+    captureLocked.value = true
+    clearTimeout(captureDebounceTimer)
+    captureDebounceTimer = setTimeout(() => { captureLocked.value = false }, 1500)
   }
 }
 
-function resetFormKeepStats() {
-  form.value   = defaultForm()
-  fieldErrors.value = {}
-  focusName.value   = false
-  focusTemp.value   = false
-  // tempUnit stays — officer keeps their preferred unit across captures
+function resetFormKeepUnit() {
+  form.value   = mkForm()
+  errors.value = {}
+  focusTemp.value = focusName.value = whoOpen.value = false
 }
-
 function resetForm() {
-  resetFormKeepStats()
+  resetFormKeepUnit()
   lastResult.value = null
 }
 
-// ─── SYNC ENGINE ─────────────────────────────────────────────────────────────
-// activeSyncKeys prevents concurrent upload of the same record UUID.
-// This is critical when auto-retry fires while manual sync is running.
-const activeSyncKeys  = new Set()
-const syncEngineRunning = ref(false)
-const syncError       = ref('')
-let   syncTimer       = null
+function incrementDay() {
+  const d = todayISO
+  if (localStorage.getItem(APP.DAY_COUNT_DAY_KEY) !== d) {
+    localStorage.setItem(APP.DAY_COUNT_DAY_KEY, d)
+    localStorage.setItem(APP.DAY_COUNT_CNT_KEY, '0')
+  }
+  const c = parseInt(localStorage.getItem(APP.DAY_COUNT_CNT_KEY)||'0') + 1
+  localStorage.setItem(APP.DAY_COUNT_CNT_KEY, String(c))
+}
 
+// ── SYNC ENGINE ───────────────────────────────────────────────────────────
 async function attemptSync(uuid) {
   if (activeSyncKeys.has(uuid)) return
   activeSyncKeys.add(uuid)
   try {
-    await _syncOne(STORE.PRIMARY_SCREENINGS, uuid, `${window.SERVER_URL}/primary-screenings`, 'primary')
+    await _syncOne(STORE.PRIMARY_SCREENINGS, uuid, `${window.SERVER_URL}/primary-screenings`)
   } finally {
     activeSyncKeys.delete(uuid)
     await loadStats()
   }
 }
 
-async function attemptSyncPair(screeningUuid, notifUuid) {
-  // Both must be sent together so the server can resolve the FK
-  if (activeSyncKeys.has(screeningUuid)) return
-  activeSyncKeys.add(screeningUuid)
-  activeSyncKeys.add(notifUuid)
+async function attemptSyncPair(sUuid, nUuid) {
+  if (activeSyncKeys.has(sUuid)) return
+  activeSyncKeys.add(sUuid)
+  activeSyncKeys.add(nUuid)
   try {
-    const res = await _syncOne(STORE.PRIMARY_SCREENINGS, screeningUuid, `${window.SERVER_URL}/primary-screenings`, 'primary')
-    if (res?.success && res?.data) {
-      // Update primary record with server id (LAW 3)
-      const stored = await dbGet(STORE.PRIMARY_SCREENINGS, screeningUuid)
+    const res = await _syncOne(STORE.PRIMARY_SCREENINGS, sUuid, `${window.SERVER_URL}/primary-screenings`)
+    if (res?.success && res?.data?.id) {
+      const stored = await dbGet(STORE.PRIMARY_SCREENINGS, sUuid)
       if (stored) {
         await safeDbPut(STORE.PRIMARY_SCREENINGS, {
           ...stored,
-          id:              res.data.id,           // LAW 3: server integer
-          server_id:       res.data.id,
-          sync_status:     SYNC.SYNCED,
-          synced_at:       isoNow(),
-          server_received_at: res.data.server_received_at ?? null,
-          record_version:  (stored.record_version || 1) + 1,
-          updated_at:      isoNow(),
-        })
-      }
-      // Sync notification — no dedicated endpoint needed; server creates it atomically.
-      // If server already created it via the primary endpoint, just mark as synced.
-      const notifStored = await dbGet(STORE.NOTIFICATIONS, notifUuid)
-      if (notifStored && res.data.notification) {
-        await safeDbPut(STORE.NOTIFICATIONS, {
-          ...notifStored,
-          id:          res.data.notification.id,
-          server_id:   res.data.notification.id,
+          id:          res.data.id,  // LAW 3
           sync_status: SYNC.SYNCED,
           synced_at:   isoNow(),
-          record_version: (notifStored.record_version || 1) + 1,
+          record_version: (stored.record_version||1) + 1,
           updated_at:  isoNow(),
         })
       }
-      // Update lastResult with server ids for display
-      if (lastResult.value?.client_uuid === screeningUuid) {
-        lastResult.value = {
-          ...lastResult.value,
-          id:          res.data.id,
-          sync_status: SYNC.SYNCED,
-          notification: res.data.notification
-            ? { ...lastResult.value.notification, id: res.data.notification.id, sync_status: SYNC.SYNCED }
-            : lastResult.value.notification,
+      if (lastResult.value?.client_uuid === sUuid) {
+        lastResult.value = { ...lastResult.value, id: res.data.id, sync_status: SYNC.SYNCED }
+      }
+      if (res.data.notification?.id) {
+        const ns = await dbGet(STORE.NOTIFICATIONS, nUuid)
+        if (ns) {
+          await safeDbPut(STORE.NOTIFICATIONS, {
+            ...ns,
+            id:          res.data.notification.id,
+            sync_status: SYNC.SYNCED,
+            synced_at:   isoNow(),
+            record_version: (ns.record_version||1) + 1,
+            updated_at:  isoNow(),
+          })
         }
       }
     }
-  } catch (e) {
-    console.warn('[PrimaryScreening] sync pair error', e)
   } finally {
-    activeSyncKeys.delete(screeningUuid)
-    activeSyncKeys.delete(notifUuid)
+    activeSyncKeys.delete(sUuid)
+    activeSyncKeys.delete(nUuid)
     await loadStats()
   }
 }
 
-/**
- * Sync a single record from a store to a server endpoint.
- * Returns the parsed server response JSON or null on failure.
- * Full developer-visible error handling — no sugar coating.
- */
-async function _syncOne(store, uuid, url, entityLabel) {
+async function _syncOne(store, uuid, url) {
   const record = await dbGet(store, uuid)
   if (!record || record.sync_status === SYNC.SYNCED) return null
 
-  // Increment attempt count BEFORE sending (crash-safe accounting)
+  // LAW 5: increment BEFORE fetch
   const working = {
     ...record,
-    sync_attempt_count: (record.sync_attempt_count || 0) + 1,
-    record_version:     (record.record_version     || 1) + 1,
-    updated_at:         isoNow(),
+    sync_attempt_count: (record.sync_attempt_count||0) + 1,
+    record_version:     (record.record_version||1) + 1,
+    updated_at:          isoNow(),
   }
   await safeDbPut(store, working)
 
   const ctrl = new AbortController()
-  const tid  = window.setTimeout(() => ctrl.abort(), APP.SYNC_TIMEOUT_MS)
-
+  const tid  = setTimeout(() => ctrl.abort(), APP.SYNC_TIMEOUT_MS)
   let res, body
   try {
-    res = await fetch(url, {
+    res  = await fetch(url, {
       method:  'POST',
-      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-      body:    JSON.stringify(buildServerPayload(working)),
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body:    JSON.stringify(buildPayload(working)),
       signal:  ctrl.signal,
     })
     body = await res.json().catch(() => ({}))
   } catch (e) {
-    const isTimeout = e?.name === 'AbortError'
     await safeDbPut(store, {
       ...working,
-      sync_status:    SYNC.UNSYNCED,
-      sync_note:      isTimeout ? 'Timed out — retrying.' : 'Network error — retrying.',
-      last_sync_error: e?.message ?? 'Network unavailable',
-      record_version: (working.record_version || 1) + 1,
-      updated_at:     isoNow(),
+      sync_status:     SYNC.UNSYNCED,
+      last_sync_error: e?.name === 'AbortError' ? 'Request timed out' : (e?.message||'Network error'),
+      record_version:  (working.record_version||1) + 1,
+      updated_at:      isoNow(),
     })
     scheduleRetry()
     return null
-  } finally {
-    clearTimeout(tid)
-  }
-
-  // ── Server responded ──────────────────────────────────────────────────────
-  // Log full server response for developer diagnostics
-  console.group(
-    `%c[PrimaryScreening][SYNC ${entityLabel.toUpperCase()}] HTTP ${res.status} — ${res.ok ? 'OK' : 'ERROR'}`,
-    `color:${res.ok ? '#28A745' : '#DC3545'};font-weight:700`
-  )
-  console.log('URL:', url)
-  console.log('client_uuid:', uuid)
-  console.log('success:', body?.success)
-  console.log('message:', body?.message)
-  if (body?.data) console.table(body.data)
-  if (body?.error) console.error('server error detail:', body.error)
-  if (body?.idempotent) console.log('%c↩ Idempotent re-submission — existing record returned', 'color:#17A2B8')
-  console.groupEnd()
+  } finally { clearTimeout(tid) }
 
   if (res.ok && body?.success) {
     await safeDbPut(store, {
       ...working,
-      id:          body.data?.id ?? null,           // LAW 3: server integer
-      server_id:   body.data?.id ?? null,
-      sync_status: SYNC.SYNCED,
-      synced_at:   isoNow(),
-      sync_note:   null,
+      id:              body.data?.id ?? null,
+      sync_status:     SYNC.SYNCED,
+      synced_at:       isoNow(),
       last_sync_error: null,
-      server_received_at: body.data?.server_received_at ?? null,
-      record_version: (working.record_version || 1) + 1,
-      updated_at:  isoNow(),
+      record_version:  (working.record_version||1) + 1,
+      updated_at:      isoNow(),
     })
     return body
   }
 
-  // Server error
   const retryable = res.status >= 500 || res.status === 429
-  const errMsg    = body?.message || body?.error?.message || `HTTP ${res.status}`
   await safeDbPut(store, {
     ...working,
     sync_status:     retryable ? SYNC.UNSYNCED : SYNC.FAILED,
-    sync_note:       retryable
-      ? `Server busy (${res.status}) — retrying.`
-      : `Rejected: ${errMsg}`,
-    last_sync_error: errMsg,
-    record_version:  (working.record_version || 1) + 1,
+    last_sync_error: body?.message || `HTTP ${res.status}`,
+    record_version:  (working.record_version||1) + 1,
     updated_at:      isoNow(),
   })
-
   if (retryable) scheduleRetry()
-  else {
-    syncError.value = `[${entityLabel.toUpperCase()}] Server rejected record: ${errMsg}. Check error.* in console for full detail.`
-  }
+  else syncError.value = `Server rejected record: ${body?.message || res.status}`
   return null
 }
 
-/** Build the payload that the server expects — LAW 2: no auth headers */
-function buildServerPayload(record) {
+function buildPayload(r) {
   return {
-    client_uuid:             record.client_uuid,
-    reference_data_version:  record.reference_data_version,
-    captured_by_user_id:     record.created_by_user_id,  // server uses this field name
-    gender:                  record.gender,
-    traveler_full_name:      record.traveler_full_name ?? null,
-    temperature_value:       record.temperature_value ?? null,
-    temperature_unit:        record.temperature_unit  ?? null,
-    symptoms_present:        record.symptoms_present,
-    captured_at:             record.captured_at,
-    captured_timezone:       record.captured_timezone ?? null,
-    device_id:               record.device_id,
-    app_version:             record.app_version ?? null,
-    platform:                record.platform    ?? 'ANDROID',
-    record_version:          record.record_version,
-    // Geographic scope is re-derived server-side from user assignment
-    // but we send it for the record (server validates against assignment)
-    country_code:            record.country_code,
-    province_code:           record.province_code,
-    pheoc_code:              record.pheoc_code,
-    district_code:           record.district_code,
-    poe_code:                record.poe_code,
+    client_uuid:            r.client_uuid,
+    reference_data_version: r.reference_data_version,
+    captured_by_user_id:    r.created_by_user_id,
+    traveler_direction:     r.traveler_direction || null,
+    gender:                 r.gender,
+    traveler_full_name:     r.traveler_full_name || null,
+    temperature_value:      r.temperature_value  || null,
+    temperature_unit:       r.temperature_unit   || null,
+    symptoms_present:       r.symptoms_present,
+    captured_at:            r.captured_at,
+    captured_timezone:      r.captured_timezone  || null,
+    device_id:              r.device_id,
+    app_version:            r.app_version || APP.VERSION,
+    platform:               r.platform    || 'ANDROID',
+    record_version:         r.record_version,
+    country_code:           r.country_code,
+    province_code:          r.province_code,
+    pheoc_code:             r.pheoc_code,
+    district_code:          r.district_code,
+    poe_code:               r.poe_code,
   }
 }
 
 function scheduleRetry() {
   clearTimeout(syncTimer)
-  syncTimer = window.setTimeout(async () => {
-    if (!navigator.onLine) {
-      scheduleRetry()
-      return
-    }
-    await manualSync()
+  syncTimer = setTimeout(async () => {
+    if (isOnline.value && pendingCount.value > 0) await manualSync()
+    else if (pendingCount.value > 0) scheduleRetry()
   }, APP.SYNC_RETRY_MS)
 }
 
 async function manualSync() {
-  if (syncEngineRunning.value) return
-  syncEngineRunning.value = true
-  syncError.value         = ''
-
+  if (syncing.value) return
+  syncing.value = true; syncError.value = ''
   try {
-    const freshAuth = JSON.parse(sessionStorage.getItem('AUTH_DATA') ?? 'null') ?? {}
-    if (!freshAuth?.poe_code) return
-
-    const unsynced = await dbQuery(
-      STORE.PRIMARY_SCREENINGS, 'sync_status', SYNC.UNSYNCED,
-      r => r.poe_code === freshAuth.poe_code
-    )
-
-    for (const rec of unsynced) {
+    const a = getAuth()
+    if (!a?.poe_code) return
+    const unsynced = await dbGetByIndex(STORE.PRIMARY_SCREENINGS, 'sync_status', SYNC.UNSYNCED)
+    for (const rec of unsynced.filter(r => r.poe_code === a.poe_code)) {
       if (activeSyncKeys.has(rec.client_uuid)) continue
       activeSyncKeys.add(rec.client_uuid)
       try {
-        const result = await _syncOne(STORE.PRIMARY_SCREENINGS, rec.client_uuid, `${window.SERVER_URL}/primary-screenings`, 'primary')
+        const result = await _syncOne(STORE.PRIMARY_SCREENINGS, rec.client_uuid, `${window.SERVER_URL}/primary-screenings`)
         if (result?.success && result?.data?.id && rec.referral_created === 1) {
-          // Also sync linked notification
           const notifs = await dbGetByIndex(STORE.NOTIFICATIONS, 'primary_screening_id', rec.client_uuid)
           for (const n of notifs) {
-            if (n.sync_status === SYNC.UNSYNCED && !activeSyncKeys.has(n.client_uuid)) {
-              activeSyncKeys.add(n.client_uuid)
-              try {
-                // Update notification's primary_screening_id to the server integer
-                // The notification is sent via the primary endpoint — server creates it.
-                // If it already exists on server, mark synced based on server response.
-                if (result.data.notification?.id) {
-                  await safeDbPut(STORE.NOTIFICATIONS, {
-                    ...n,
-                    id:          result.data.notification.id,
-                    server_id:   result.data.notification.id,
-                    sync_status: SYNC.SYNCED,
-                    synced_at:   isoNow(),
-                    record_version: (n.record_version || 1) + 1,
-                    updated_at:  isoNow(),
-                  })
-                }
-              } finally {
-                activeSyncKeys.delete(n.client_uuid)
-              }
-            }
-          }
-        }
-      } finally {
-        activeSyncKeys.delete(rec.client_uuid)
-      }
-    }
-
-    await loadStats()
-  } catch (e) {
-    syncError.value = `Sync engine error: ${e?.message ?? 'Unknown'}. See console.`
-    console.error('[PrimaryScreening] manualSync error', e)
-  } finally {
-    syncEngineRunning.value = false
-  }
-}
-
-// ─── RECORDS LIST — paginated, filtered, handles millions of records ─────────
-const records        = ref([])
-const recordsLoading = ref(false)
-
-async function loadRecords(resetPage = true) {
-  recordsLoading.value = true
-  if (resetPage) recordsPage.value = 0
-  try {
-    const freshAuth = JSON.parse(sessionStorage.getItem('AUTH_DATA') ?? 'null') ?? {}
-    if (!freshAuth?.poe_code) return
-
-    // Load all records for this POE from IDB — Dexie index scan is fast even for millions
-    const all = await dbGetByIndex(STORE.PRIMARY_SCREENINGS, 'poe_code', freshAuth.poe_code)
-
-    // Apply date filter (filterDate = 'YYYY-MM-DD')
-    let filtered = all.filter(r =>
-      (r.captured_at ?? r.created_at ?? '').startsWith(filterDate.value)
-    )
-
-    // Apply symptoms filter
-    if (filterSymptoms.value === 'YES') filtered = filtered.filter(r => r.symptoms_present === 1)
-    if (filterSymptoms.value === 'NO')  filtered = filtered.filter(r => r.symptoms_present === 0)
-
-    // Apply sync filter
-    if (filterSync.value !== 'ALL') filtered = filtered.filter(r => r.sync_status === filterSync.value)
-
-    // Sort newest first
-    filtered.sort((a, b) => (b.captured_at ?? b.created_at ?? '').localeCompare(a.captured_at ?? a.created_at ?? ''))
-
-    recordsTotal.value = filtered.length
-
-    // Paginate — only load current page slice
-    const start = recordsPage.value * RECORDS_PER_PAGE
-    records.value = filtered
-      .slice(start, start + RECORDS_PER_PAGE)
-      .map(r => ({ ...r, id: r.id ?? r.server_id ?? null }))  // LAW 4
-
-  } catch (e) {
-    console.error('[PrimaryScreening] loadRecords error', e)
-  } finally {
-    recordsLoading.value = false
-  }
-}
-
-function applyFilter(date, label) {
-  filterDate.value      = date
-  filterDateLabel.value = label
-  filterModalOpen.value = false
-  void loadRecords(true)
-}
-
-function prevRecordsPage() {
-  if (recordsPage.value > 0) { recordsPage.value--; void loadRecords(false) }
-}
-
-function nextRecordsPage() {
-  if ((recordsPage.value + 1) * RECORDS_PER_PAGE < recordsTotal.value) {
-    recordsPage.value++; void loadRecords(false)
-  }
-}
-
-// ─── REFERRAL QUEUE ───────────────────────────────────────────────────────────
-const queueItems   = ref([])
-const queueLoading = ref(false)
-const queueError   = ref('')
-
-async function loadQueue() {
-  queueLoading.value = true
-  queueError.value   = ''
-  try {
-    const freshAuth = JSON.parse(sessionStorage.getItem('AUTH_DATA') ?? 'null') ?? {}
-    if (!freshAuth?.poe_code) return
-
-    // First load from IDB (instant offline data)
-    const allNotifs = await dbGetByIndex(STORE.NOTIFICATIONS, 'poe_code', freshAuth.poe_code)
-
-    // Cross-join with primary screenings for gender/temp context
-    const enriched = []
-    for (const n of allNotifs) {
-      // Normalise id per LAW 4
-      const notifNorm = { ...n, id: n.id ?? n.server_id ?? null }
-
-      let primaryRec = null
-      try {
-        // Look up by client_uuid (IDB key) first, then server integer id
-        primaryRec = await dbGet(STORE.PRIMARY_SCREENINGS, n.primary_screening_id)
-        if (!primaryRec && n.primary_screening_id) {
-          // Fallback: search by server integer id if client_uuid lookup missed
-          const all = await dbGetByIndex(STORE.PRIMARY_SCREENINGS, 'poe_code', freshAuth.poe_code)
-          primaryRec = all.find(r => r.id == n.primary_screening_id) ?? null
-        }
-      } catch { /* not found — proceed without */ }
-
-      enriched.push({
-        notification_id:          notifNorm.id,
-        notification_uuid:        notifNorm.client_uuid,
-        notification_status:      notifNorm.status,
-        priority:                 notifNorm.priority,
-        reason_code:              notifNorm.reason_code,
-        reason_text:              notifNorm.reason_text,
-        assigned_role_key:        notifNorm.assigned_role_key,
-        assigned_user_id:         notifNorm.assigned_user_id,
-        notification_created_at:  notifNorm.created_at,
-        notification_opened_at:   notifNorm.opened_at,
-        primary_screening_id:     notifNorm.primary_screening_id,
-        primary_uuid:             primaryRec?.client_uuid ?? null,
-        gender:                   primaryRec?.gender ?? null,
-        temperature_value:        primaryRec?.temperature_value ?? null,
-        temperature_unit:         primaryRec?.temperature_unit ?? null,
-        traveler_full_name:       primaryRec?.traveler_full_name ?? null,
-        symptoms_present:         primaryRec?.symptoms_present ?? 1,
-        captured_at:              primaryRec?.captured_at ?? null,
-        primary_record_status:    primaryRec?.record_status ?? null,
-        screener_name:            null, // not stored locally
-        poe_code:                 notifNorm.poe_code,
-        is_voided_primary:        primaryRec?.record_status === 'VOIDED',
-        _raw_notification:        notifNorm, // kept for cancel operations
-      })
-    }
-
-    // Filter by status (default: OPEN only)
-    const statusFiltered = queueStatusFilter.value === 'ALL'
-      ? enriched
-      : enriched.filter(e => e.notification_status === queueStatusFilter.value)
-
-    // Sort: CRITICAL first, then HIGH, then NORMAL; oldest first within each
-    const priorityOrder = { CRITICAL: 0, HIGH: 1, NORMAL: 2 }
-    statusFiltered.sort((a, b) => {
-      const pa = priorityOrder[a.priority] ?? 2
-      const pb = priorityOrder[b.priority] ?? 2
-      if (pa !== pb) return pa - pb
-      return (a.notification_created_at ?? '').localeCompare(b.notification_created_at ?? '')
-    })
-
-    queueItems.value = statusFiltered
-
-    // If online, also fetch from server for records created on other devices
-    if (navigator.onLine && freshAuth.id) {
-      try {
-        const ctrl = new AbortController()
-        const tid  = window.setTimeout(() => ctrl.abort(), APP.SYNC_TIMEOUT_MS)
-        const res  = await fetch(
-          `${window.SERVER_URL}/referral-queue?user_id=${freshAuth.id}&status=ALL`,
-          { headers: { 'Accept': 'application/json' }, signal: ctrl.signal }
-        )
-        clearTimeout(tid)
-        const body = await res.json().catch(() => ({}))
-
-        console.group('%c[PrimaryScreening][QUEUE] Server response', `color:${res.ok ? '#0066CC' : '#DC3545'};font-weight:700`)
-        console.log('success:', body?.success, '| total:', body?.data?.total)
-        if (body?.error) console.error('error:', body.error)
-        console.groupEnd()
-
-        if (res.ok && body?.success && Array.isArray(body?.data?.items)) {
-          // Write server items into IDB, then rebuild the display list in-place.
-          // NEVER call loadQueue() here — that causes infinite recursion because
-          // loadQueue() calls the server again, which re-enters this block forever.
-          let didUpdate = false
-
-          for (const si of body.data.items) {
-            if (!si.notification_id) continue
-            const local = allNotifs.find(n => n.id == si.notification_id || n.client_uuid === si.notification_uuid)
-            if (local) {
-              if (si.status !== local.status || local.sync_status !== SYNC.SYNCED) {
-                await safeDbPut(STORE.NOTIFICATIONS, {
-                  ...local,
-                  id:          si.notification_id,
-                  server_id:   si.notification_id,
-                  status:      si.status,
-                  sync_status: SYNC.SYNCED,
-                  synced_at:   isoNow(),
-                  record_version: (local.record_version || 1) + 1,
-                  updated_at:  isoNow(),
-                })
-                didUpdate = true
-              }
-            } else {
-              // Server has a notification not yet in IDB (created on another device).
-              // Write it locally so it shows up.
-              const freshAuth2 = JSON.parse(sessionStorage.getItem('AUTH_DATA') ?? 'null') ?? {}
+            if (n.sync_status === SYNC.UNSYNCED && result.data.notification?.id) {
               await safeDbPut(STORE.NOTIFICATIONS, {
-                client_uuid:            si.notification_uuid ?? `srv-${si.notification_id}`,
-                id:                     si.notification_id,
-                server_id:              si.notification_id,
-                status:                 si.status,
-                priority:               si.priority,
-                reason_code:            si.reason_code,
-                reason_text:            si.reason_text,
-                assigned_role_key:      si.assigned_role_key,
-                assigned_user_id:       si.assigned_user_id,
-                notification_type:      'SECONDARY_REFERRAL',
-                primary_screening_id:   si.primary_screening_id,
-                created_by_user_id:     null,
-                poe_code:               freshAuth2.poe_code ?? null,
-                district_code:          freshAuth2.district_code ?? null,
-                province_code:          freshAuth2.province_code ?? null,
-                pheoc_code:             freshAuth2.pheoc_code ?? null,
-                country_code:           freshAuth2.country_code ?? null,
-                opened_at:              si.notification_opened_at ?? null,
-                closed_at:              null,
-                device_id:              'server',
-                app_version:            null,
-                platform:               'WEB',
-                reference_data_version: APP.REFERENCE_DATA_VER,
-                server_received_at:     null,
-                sync_status:            SYNC.SYNCED,
-                synced_at:              isoNow(),
-                sync_attempt_count:     0,
-                last_sync_error:        null,
-                record_version:         1,
-                created_at:             si.notification_created_at ?? isoNow(),
-                updated_at:             isoNow(),
+                ...n, id: result.data.notification.id,
+                sync_status: SYNC.SYNCED, synced_at: isoNow(),
+                record_version: (n.record_version||1) + 1, updated_at: isoNow(),
               })
-              didUpdate = true
             }
           }
-
-          // Always build display directly from server items — server is authoritative.
-          // IDB writes above are background caching only.
-          // Build enriched list directly from server response items.
-          const allPS = await dbGetByIndex(STORE.PRIMARY_SCREENINGS, 'poe_code', freshAuth.poe_code)
-          const serverEnriched = []
-          for (const si of body.data.items) {
-            // Find local primary record for context (gender/temp)
-            let primaryRec2 = allPS.find(r =>
-              r.client_uuid === si.primary_uuid ||
-              r.id == si.primary_screening_id
-            ) ?? null
-
-            // Find the raw notification from IDB for cancel operations
-            const rawNotif = allNotifs.find(n =>
-              n.id == si.notification_id || n.client_uuid === si.notification_uuid
-            ) ?? {
-              client_uuid:  si.notification_uuid ?? `srv-${si.notification_id}`,
-              id:           si.notification_id,
-              status:       si.notification_status,
-              priority:     si.priority,
-              reason_code:  si.reason_code,
-              reason_text:  si.reason_text,
-              poe_code:     freshAuth.poe_code,
-              primary_screening_id: si.primary_screening_id,
-              record_version: 1,
-            }
-
-            serverEnriched.push({
-              notification_id:         si.notification_id,
-              notification_uuid:       si.notification_uuid,
-              notification_status:     si.notification_status,
-              priority:                si.priority,
-              reason_code:             si.reason_code,
-              reason_text:             si.reason_text,
-              assigned_role_key:       si.assigned_role_key,
-              assigned_user_id:        si.assigned_user_id,
-              notification_created_at: si.notification_created_at,
-              notification_opened_at:  si.notification_opened_at,
-              primary_screening_id:    si.primary_screening_id,
-              primary_uuid:            primaryRec2?.client_uuid ?? si.primary_uuid ?? null,
-              gender:                  primaryRec2?.gender ?? si.gender ?? null,
-              temperature_value:       primaryRec2?.temperature_value ?? si.temperature_value ?? null,
-              temperature_unit:        primaryRec2?.temperature_unit ?? si.temperature_unit ?? null,
-              traveler_full_name:      primaryRec2?.traveler_full_name ?? si.traveler_full_name ?? null,
-              symptoms_present:        primaryRec2?.symptoms_present ?? 1,
-              captured_at:             primaryRec2?.captured_at ?? si.captured_at ?? null,
-              primary_record_status:   primaryRec2?.record_status ?? si.primary_record_status ?? 'COMPLETED',
-              screener_name:           si.screener_name ?? null,
-              poe_code:                freshAuth.poe_code,
-              is_voided_primary:       (primaryRec2?.record_status ?? si.primary_record_status) === 'VOIDED',
-              _raw_notification:       rawNotif,
-            })
-          }
-
-          const sf2 = queueStatusFilter.value === 'ALL'
-            ? serverEnriched
-            : serverEnriched.filter(e => e.notification_status === queueStatusFilter.value)
-          const po2 = { CRITICAL: 0, HIGH: 1, NORMAL: 2 }
-          sf2.sort((a, b) => {
-            const pa = po2[a.priority] ?? 2, pb = po2[b.priority] ?? 2
-            if (pa !== pb) return pa - pb
-            return (a.notification_created_at ?? '').localeCompare(b.notification_created_at ?? '')
-          })
-          queueItems.value = sf2
         }
-      } catch (e) {
-        if (e?.name !== 'AbortError') {
-          queueError.value = `Queue server sync failed: ${e?.message ?? 'Network error'}. Showing local data only.`
-        }
-      }
+      } finally { activeSyncKeys.delete(rec.client_uuid) }
     }
-  } catch (e) {
-    queueError.value = `Failed to load queue: ${e?.message ?? 'Unknown error'}`
-    console.error('[PrimaryScreening] loadQueue error', e)
-  } finally {
-    queueLoading.value = false
-  }
-}
-
-// ─── VOID ────────────────────────────────────────────────────────────────────
-const voidModalOpen   = ref(false)
-const voidReason      = ref('')
-const voidError       = ref('')
-const voiding         = ref(false)
-const recordToVoid    = ref(null)
-
-function canVoidRecord(rec) {
-  const freshAuth = JSON.parse(sessionStorage.getItem('AUTH_DATA') ?? 'null') ?? {}
-  const rk = freshAuth?.role_key ?? ''
-  if (['POE_ADMIN', 'NATIONAL_ADMIN'].includes(rk)) return true
-  if (rec.created_by_user_id === freshAuth?.id) {
-    const capturedTs = new Date(rec.captured_at ?? rec.created_at ?? 0).getTime()
-    return Date.now() - capturedTs < 86400_000 // within 24 hours
-  }
-  return false
-}
-
-function promptVoid(rec) {
-  recordToVoid.value = rec
-  voidReason.value   = ''
-  voidError.value    = ''
-  voidModalOpen.value = true
-}
-
-async function executeVoid() {
-  if (voiding.value || !recordToVoid.value) return
-  if (voidReason.value.trim().length < 10) {
-    voidError.value = 'Reason must be at least 10 characters.'
-    return
-  }
-
-  voiding.value = true
-  voidError.value = ''
-
-  try {
-    const rec     = recordToVoid.value
-    const freshAuth = JSON.parse(sessionStorage.getItem('AUTH_DATA') ?? 'null') ?? {}
-    const now     = isoNow()
-
-    // ── LOCAL VOID (offline-first) ─────────────────────────────────────────
-    const local = await dbGet(STORE.PRIMARY_SCREENINGS, rec.client_uuid)
-    if (local) {
-      await safeDbPut(STORE.PRIMARY_SCREENINGS, {
-        ...local,
-        record_status:  'VOIDED',
-        void_reason:    voidReason.value.trim(),
-        sync_status:    SYNC.UNSYNCED, // needs to sync void to server
-        record_version: (local.record_version || 1) + 1,
-        updated_at:     now,
-      })
-    }
-
-    // Auto-close OPEN linked notification (not IN_PROGRESS — secondary officer handles those)
-    if (rec.referral_created === 1) {
-      const notifs = await dbGetByIndex(STORE.NOTIFICATIONS, 'primary_screening_id', rec.client_uuid)
-      for (const n of notifs) {
-        if (n.status === 'OPEN') {
-          await safeDbPut(STORE.NOTIFICATIONS, {
-            ...n,
-            status:         'CLOSED',
-            closed_at:      now,
-            reason_text:    `Primary screening voided: ${voidReason.value.trim()}`,
-            sync_status:    SYNC.UNSYNCED,
-            record_version: (n.record_version || 1) + 1,
-            updated_at:     now,
-          })
-        }
-        // IN_PROGRESS notifications left for secondary officer — NOT auto-closed
-      }
-    }
-
-    // ── SERVER VOID (if online and record has server id) ───────────────────
-    const serverId = rec.id ?? rec.server_id ?? null
-    if (navigator.onLine && serverId && Number.isInteger(Number(serverId)) && Number(serverId) > 0) {
-      try {
-        const ctrl = new AbortController()
-        const tid  = window.setTimeout(() => ctrl.abort(), APP.SYNC_TIMEOUT_MS)
-        const res  = await fetch(`${window.SERVER_URL}/primary-screenings/${serverId}/void`, {
-          method:  'PATCH',
-          headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-          body:    JSON.stringify({
-            user_id:      freshAuth.id,
-            void_reason:  voidReason.value.trim(),
-          }),
-          signal: ctrl.signal,
-        })
-        clearTimeout(tid)
-        const body = await res.json().catch(() => ({}))
-
-        console.group(`%c[PrimaryScreening][VOID] HTTP ${res.status}`, `color:${res.ok ? '#28A745' : '#DC3545'};font-weight:700`)
-        console.log('success:', body?.success, '| message:', body?.message)
-        if (body?.error) console.error('void error detail:', body.error)
-        console.groupEnd()
-
-        if (res.ok && body?.success) {
-          // Mark local record as synced on void
-          const updated = await dbGet(STORE.PRIMARY_SCREENINGS, rec.client_uuid)
-          if (updated) {
-            await safeDbPut(STORE.PRIMARY_SCREENINGS, {
-              ...updated,
-              sync_status: SYNC.SYNCED,
-              synced_at:   isoNow(),
-              record_version: (updated.record_version || 1) + 1,
-              updated_at:  isoNow(),
-            })
-          }
-        } else if (!res.ok) {
-          // Not fatal — local void is already done. Server void will retry on next sync.
-          console.warn('[PrimaryScreening] Server void failed — will retry on next sync:', body?.message)
-        }
-      } catch (e) {
-        if (e?.name !== 'AbortError') console.warn('[PrimaryScreening] Void server call failed:', e?.message)
-        // Non-fatal — local void committed, sync will pick it up later
-      }
-    }
-
-    voidModalOpen.value = false
-    // Clear lastResult if it was this record
-    if (lastResult.value?.client_uuid === rec.client_uuid) lastResult.value = null
     await loadStats()
-    await loadRecords()
-
-    const t = await toastController.create({ message: 'Record voided.', duration: 2500, color: 'warning' })
-    void t.present()
   } catch (e) {
-    voidError.value = `Void failed: ${e?.message ?? 'Unknown error'}`
-    console.error('[PrimaryScreening] executeVoid error', e)
-  } finally {
-    voiding.value = false
-  }
+    syncError.value = `Sync error: ${e?.message||'Unknown'}`
+    console.error('[PS] manualSync', e)
+  } finally { syncing.value = false }
 }
 
-// ─── CANCEL REFERRAL ─────────────────────────────────────────────────────────
-// BUSINESS RULE: Cancelling a referral closes the notification ONLY.
-// The primary screening record remains COMPLETED with referral_created=1.
-// This is an immutable audit record — the referral was issued and then cancelled.
-// Both facts are preserved. The primary record is NOT voided.
-const cancelModalOpen   = ref(false)
-const cancelReason      = ref('')
-const cancelError       = ref('')
-const cancellingActive  = ref(false)
-const cancellingId      = ref(null)   // notification_id being cancelled (for UI state)
-const itemToCancel      = ref(null)
-
-function promptCancelReferral(item) {
-  itemToCancel.value  = item
-  cancelReason.value  = ''
-  cancelError.value   = ''
-  cancelModalOpen.value = true
-}
-
-async function executeCancelReferral() {
-  if (cancellingActive.value || !itemToCancel.value) return
-  if (cancelReason.value.trim().length < 5) {
-    cancelError.value = 'Reason must be at least 5 characters.'
-    return
-  }
-
-  cancellingActive.value = true
-  cancelError.value      = ''
-  const item             = itemToCancel.value
-  cancellingId.value     = item.notification_id
-
+// ── RECORDS ───────────────────────────────────────────────────────────────
+async function loadRecords(resetPage = true) {
+  recLoading.value = true
+  if (resetPage) page.value = 0
   try {
-    const freshAuth = JSON.parse(sessionStorage.getItem('AUTH_DATA') ?? 'null') ?? {}
-    const now       = isoNow()
+    const a = getAuth()
+    if (!a?.poe_code) return
+    let all = await dbGetByIndex(STORE.PRIMARY_SCREENINGS, 'poe_code', a.poe_code)
+    all = all.filter(r => (r.captured_at||'').startsWith(filterDate.value))
+    if (fSym.value === 'YES') all = all.filter(r => r.symptoms_present === 1)
+    if (fSym.value === 'NO')  all = all.filter(r => r.symptoms_present === 0)
+    if (fSync.value !== 'ALL') all = all.filter(r => r.sync_status === fSync.value)
+    if (fDir.value !== 'ALL') all = all.filter(r => r.traveler_direction === fDir.value)
+    all.sort((a,b) => (b.captured_at||'').localeCompare(a.captured_at||''))
+    recordsTotal.value = all.length
+    const s = page.value * PAGE_SIZE
+    records.value = all.slice(s, s + PAGE_SIZE).map(r => ({ ...r, id: r.id ?? r.server_id ?? null }))
+  } catch (e) { console.error('[PS] loadRecords', e) }
+  finally { recLoading.value = false }
+}
 
-    // ── LOCAL CANCEL — close notification, primary record UNTOUCHED ─────────
-    const notif = item._raw_notification
-    if (notif) {
-      await safeDbPut(STORE.NOTIFICATIONS, {
-        ...notif,
-        status:         'CLOSED',
-        closed_at:      now,
-        reason_text:    `Referral cancelled by ${freshAuth.full_name ?? 'Officer'}: ${cancelReason.value.trim()}`,
-        sync_status:    SYNC.UNSYNCED,
-        record_version: (notif.record_version || 1) + 1,
-        updated_at:     now,
-      })
-      // Primary record: DO NOT TOUCH. referral_created stays 1. record_status stays COMPLETED.
-      // This is the business rule. Log it explicitly.
-      console.log(
-        '%c[PrimaryScreening][CANCEL_REFERRAL] Notification closed. Primary record UNCHANGED — referral_created=1 preserved.',
-        'color:#17A2B8;font-weight:700'
-      )
-    }
+function cycleDir() {
+  const opts = ['ALL','ENTRY','EXIT','TRANSIT']
+  fDir.value = opts[(opts.indexOf(fDir.value)+1) % opts.length]
+  loadRecords()
+}
+function applyDate(v, l) { filterDate.value = v; filterLabel.value = l; filterOpen.value = false; loadRecords(true) }
 
-    // ── SERVER CANCEL ────────────────────────────────────────────────────────
-    const serverId = item.notification_id
-    if (navigator.onLine && serverId && Number.isInteger(Number(serverId)) && Number(serverId) > 0) {
+// ── QUEUE ─────────────────────────────────────────────────────────────────
+async function loadQueue() {
+  qLoading.value = true
+  try {
+    const a = getAuth()
+    if (!a?.poe_code) return
+    const all = await dbGetByIndex(STORE.NOTIFICATIONS, 'poe_code', a.poe_code)
+    const filtered = qFilter.value === 'OPEN' ? all.filter(n => n.status === 'OPEN') : all
+    const enriched = []
+    for (const n of filtered) {
+      let primary = null
       try {
-        const ctrl = new AbortController()
-        const tid  = window.setTimeout(() => ctrl.abort(), APP.SYNC_TIMEOUT_MS)
-        const res  = await fetch(`${window.SERVER_URL}/referral-queue/${serverId}/cancel`, {
-          method:  'PATCH',
-          headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-          body:    JSON.stringify({ user_id: freshAuth.id, cancel_reason: cancelReason.value.trim() }),
-          signal:  ctrl.signal,
-        })
-        clearTimeout(tid)
-        const body = await res.json().catch(() => ({}))
-
-        console.group(`%c[PrimaryScreening][CANCEL_REFERRAL SERVER] HTTP ${res.status}`, `color:${res.ok ? '#28A745' : '#DC3545'};font-weight:700`)
-        console.log('success:', body?.success, '| message:', body?.message)
-        if (body?.error) console.error('cancel error detail:', body.error)
-        if (body?.data?.audit_note) console.log('audit note:', body.data.audit_note)
-        if (body?.data?.primary_screening) {
-          console.log('%c Primary record (server confirms UNCHANGED):', 'color:#17A2B8;font-weight:600', {
-            id:               body.data.primary_screening.id,
-            record_status:    body.data.primary_screening.record_status,
-            referral_created: body.data.primary_screening.referral_created,
-          })
+        primary = await dbGet(STORE.PRIMARY_SCREENINGS, n.primary_screening_id)
+        if (!primary) {
+          const ps = await dbGetByIndex(STORE.PRIMARY_SCREENINGS, 'poe_code', a.poe_code)
+          primary = ps.find(r => r.id === n.primary_screening_id || r.client_uuid === n.primary_screening_id) || null
         }
-        console.groupEnd()
-
-        // Handle 409 — secondary case already open
-        if (res.status === 409) {
-          const errDetail = body?.error
-          cancelError.value = body?.message ?? 'Cannot cancel — secondary case already opened.'
-          if (errDetail?.secondary_case_id) {
-            cancelError.value += ` Secondary case ID: ${errDetail.secondary_case_id}. The secondary officer must close it.`
-          }
-          // Revert local cancel since server rejected it
-          if (notif) {
-            await safeDbPut(STORE.NOTIFICATIONS, {
-              ...notif,
-              status:         'OPEN',   // revert
-              closed_at:      null,
-              record_version: (notif.record_version || 1) + 1,
-              updated_at:     isoNow(),
-            })
-          }
-          return
-        }
-
-        if (res.ok && body?.success && notif) {
-          await safeDbPut(STORE.NOTIFICATIONS, {
-            ...notif,
-            id:          serverId,
-            server_id:   serverId,
-            status:      'CLOSED',
-            closed_at:   now,
-            sync_status: SYNC.SYNCED,
-            synced_at:   isoNow(),
-            reason_text: `Referral cancelled: ${cancelReason.value.trim()}`,
-            record_version: (notif.record_version || 1) + 1,
-            updated_at:  isoNow(),
-          })
-        }
-      } catch (e) {
-        if (e?.name !== 'AbortError') {
-          console.warn('[PrimaryScreening] Cancel server call failed (will sync later):', e?.message)
-        }
-      }
+      } catch {}
+      enriched.push({ ...n, id: n.id ?? n.server_id ?? null, primary })
     }
-
-    cancelModalOpen.value  = false
-    await loadStats()
-    await loadQueue()
-
-    const t = await toastController.create({ message: 'Referral cancelled. Primary record preserved.', duration: 3000, color: 'warning' })
-    void t.present()
-  } catch (e) {
-    cancelError.value = `Cancel failed: ${e?.message ?? 'Unknown error'}`
-    console.error('[PrimaryScreening] executeCancelReferral error', e)
-  } finally {
-    cancellingActive.value = false
-    cancellingId.value     = null
-  }
-}
-
-// ─── UTILITY FORMATTERS ───────────────────────────────────────────────────────
-function formatTime(dt) {
-  if (!dt) return '—'
-  try {
-    return new Date(dt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-  } catch { return dt }
-}
-
-function truncate(str, len) {
-  if (!str) return ''
-  return str.length > len ? str.slice(0, len) + '…' : str
-}
-
-function goBack() {
-  router.back()
-}
-
-// ─── Date presets for filter modal ───────────────────────────────────────────
-const datePresets = computed(() => {
-  const fmt = (d) => d.toISOString().slice(0, 10)
-  const today = new Date()
-  const presets = []
-  for (let i = 0; i < 7; i++) {
-    const d = new Date(today)
-    d.setDate(today.getDate() - i)
-    const iso = fmt(d)
-    presets.push({
-      label: i === 0 ? 'Today' : i === 1 ? 'Yesterday' : iso,
-      date:  iso,
+    enriched.sort((a,b) => {
+      const o = { CRITICAL:0, HIGH:1, NORMAL:2 }
+      return (o[a.priority]??3) - (o[b.priority]??3) || (b.created_at||'').localeCompare(a.created_at||'')
     })
-  }
-  const ms = new Date(today.getFullYear(), today.getMonth(), 1)
-  presets.push({ label: `Month start (${fmt(ms)})`, date: fmt(ms) })
-  const ys = new Date(today.getFullYear(), 0, 1)
-  presets.push({ label: `Year start (${fmt(ys)})`, date: fmt(ys) })
-  return presets
-})
+    queue.value = enriched
+  } catch (e) { console.error('[PS] loadQueue', e) }
+  finally { qLoading.value = false }
+}
 
-// ─── LIFECYCLE ───────────────────────────────────────────────────────────────
-let autoStatsTimer = null
-let onOnline, onOffline
+// ── VOID ──────────────────────────────────────────────────────────────────
+function promptVoid() { voidTarget.value = lastResult.value; voidReason.value = ''; showVoid.value = true }
+function promptVoidRecord(rec) { voidTarget.value = rec; voidReason.value = ''; showVoid.value = true }
 
-onMounted(() => {
-  // Read auth fresh
+async function confirmVoid() {
+  if (voidReason.value.trim().length < 10 || voiding.value || !voidTarget.value) return
+  voiding.value = true
   try {
-    auth.value = JSON.parse(sessionStorage.getItem('AUTH_DATA') ?? 'null') ?? {}
-  } catch {
-    auth.value = {}
-  }
+    const rec    = voidTarget.value
+    const stored = await dbGet(STORE.PRIMARY_SCREENINGS, rec.client_uuid)
+    if (!stored) return
+    await safeDbPut(STORE.PRIMARY_SCREENINGS, {
+      ...stored, record_status: 'VOIDED', void_reason: voidReason.value.trim(),
+      sync_status: SYNC.UNSYNCED, record_version: (stored.record_version||1)+1, updated_at: isoNow(),
+    })
+    if (stored.referral_created === 1) {
+      const ns = await dbGetByIndex(STORE.NOTIFICATIONS, 'primary_screening_id', rec.client_uuid)
+      for (const n of ns) {
+        if (n.status !== 'CLOSED') {
+          await safeDbPut(STORE.NOTIFICATIONS, {
+            ...n, status: 'CLOSED', closed_at: isoNow(), sync_status: SYNC.UNSYNCED,
+            record_version: (n.record_version||1)+1, updated_at: isoNow(),
+          })
+        }
+      }
+    }
+    showVoid.value = false; voidTarget.value = null; voidReason.value = ''
+    if (lastResult.value?.client_uuid === rec.client_uuid)
+      lastResult.value = { ...lastResult.value, record_status: 'VOIDED' }
+    await loadStats()
+    void manualSync()
+  } catch (e) { console.error('[PS] confirmVoid', e) }
+  finally { voiding.value = false }
+}
 
-  // Network listeners
-  onOnline  = () => { isOnline.value = true;  void manualSync() }
-  onOffline = () => { isOnline.value = false }
-  window.addEventListener('online',  onOnline)
-  window.addEventListener('offline', onOffline)
+// ── HELPERS ───────────────────────────────────────────────────────────────
+function syncCls(s) { return s === SYNC.SYNCED ? 'synced' : s === SYNC.FAILED ? 'failed' : 'pending' }
 
-  // Initial load — also load queue so badge count is accurate
-  void loadStats()
-  void loadQueue()
-  void loadRecords()
-
-  // Auto-refresh stats every 30 seconds
-  autoStatsTimer = window.setInterval(() => {
-    void loadStats()
-  }, 30_000)
-
-  // Log developer context
-  console.group('%c[PrimaryScreeningView] MOUNTED', 'color:#0066CC;font-weight:700;font-size:13px')
-  console.table({
-    poe_code:      auth.value?.poe_code,
-    district_code: auth.value?.district_code,
-    role_key:      auth.value?.role_key,
-    can_screen:    auth.value?._permissions?.can_do_primary_screening,
-    device_id:     auth.value?.device_id,
-  })
-  console.log('SERVER_URL:', window.SERVER_URL)
-  console.groupEnd()
-})
-
-onUnmounted(() => {
-  // CRITICAL: Clear ALL timers and remove ALL event listeners.
-  // Failure to do this causes memory leaks and phantom syncs.
-  clearTimeout(syncTimer)
-  clearInterval(autoStatsTimer)
-  window.removeEventListener('online',  onOnline)
-  window.removeEventListener('offline', onOffline)
-})
+function fmtTime(dt) {
+  if (!dt) return '—'
+  try { return new Date(dt).toLocaleTimeString('en-UG', { hour:'2-digit', minute:'2-digit' }) }
+  catch { return dt?.slice(11,16) || '—' }
+}
+function fmtDateTime(dt) {
+  if (!dt) return '—'
+  try { return new Date(dt).toLocaleString('en-UG', { day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' }) }
+  catch { return dt }
+}
 </script>
 
+
 <style scoped>
-/* ════════════════════════════════════════════════════════════════════════════
-   PRIMARY SCREENING VIEW — Light Material Navy Design System
-   #0D47A1 Blue header · #2E7D32 Green OK · #C62828 Red symptomatic
-   #E65100 Orange HIGH priority · #EEF2FF cool content background
-   NO DARK MODE — light only
-════════════════════════════════════════════════════════════════════════════ */
+/*
+  PRIMARY SCREENING — RAPID DATA ENTRY
+  Font:  -apple-system, BlinkMacSystemFont, 'Segoe UI', Ubuntu, sans-serif
+  Theme: Dual-tone (dark header / light content)
+  Goal:  Zero scroll on capture, pixel-perfect, no clutter
+*/
 
-/* ── HEADER ── */
-.ps-header {
-  --background: transparent;
-  background: linear-gradient(180deg, #0D47A1 0%, #1565C0 100%);
-  position: relative;
-  overflow: hidden;
-}
-.ps-hdr-pattern {
-  position: absolute; inset: 0; pointer-events: none;
-  background-image:
-    radial-gradient(circle at 80% 20%, rgba(255,255,255,0.07) 0%, transparent 50%),
-    radial-gradient(circle at 10% 80%, rgba(255,255,255,0.05) 0%, transparent 40%);
+/* ── Keyframes ──────────────────────────────────────────────── */
+@keyframes spin     { to { transform: rotate(360deg) } }
+@keyframes revealIn { from { opacity:0; transform:translateY(-8px) } to { opacity:1; transform:translateY(0) } }
+@keyframes resultIn { from { opacity:0; transform:translateY(10px) scale(.97) } to { opacity:1; transform:translateY(0) scale(1) } }
+@keyframes slideUp  { from { opacity:0; transform:translateY(12px) } to { opacity:1; transform:translateY(0) } }
+@keyframes dotPulse { 0%,100%{ box-shadow:0 0 6px rgba(224,32,80,.3) } 50%{ box-shadow:0 0 14px rgba(224,32,80,.6) } }
+@keyframes netGlow  { 0%,100%{ box-shadow:0 0 4px rgba(0,230,118,.4) } 50%{ box-shadow:0 0 10px rgba(0,230,118,.8) } }
+@keyframes dataStream { 0%{transform:translateX(-100%)} 100%{transform:translateX(350%)} }
+@media (prefers-reduced-motion:reduce){ *,*::before,*::after{ animation-duration:.01ms!important; transition-duration:.01ms!important } }
+
+/* ── Font stack — system native ─────────────────────────────── */
+:host, * {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Ubuntu, 'Helvetica Neue', Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  box-sizing: border-box;
 }
 
-/* Top bar */
-.ps-hdr-top {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 12px 16px 14px; position: relative; z-index: 2;
+/* ═══════════════════════════════════════════════════════════════
+   DARK ZONE — Header (--hdr-1 / --hdr-2 / --hdr-3)
+═══════════════════════════════════════════════════════════════ */
+.ps-hdr    { --background: #070E1B; --border-width: 0; }
+.ps-toolbar {
+  --background: linear-gradient(180deg, #070E1B 0%, #0E1A2E 100%);
+  --color: #EDF2FA; --border-width: 0; --min-height: 48px;
 }
-.ps-hdr-left { display: flex; align-items: center; gap: 10px; }
-.ps-back-btn {
-  width: 36px; height: 36px; border-radius: 50%;
-  background: rgba(255,255,255,0.12); border: 1px solid rgba(255,255,255,0.18);
-  display: flex; align-items: center; justify-content: center;
-  cursor: pointer; flex-shrink: 0;
+.ps-toolbar-title {
+  padding: 0;
 }
-.ps-back-btn svg { width: 18px; height: 18px; }
-.ps-eyebrow {
-  font-size: 9px; font-weight: 700; letter-spacing: 2.5px;
-  text-transform: uppercase; color: rgba(255,255,255,0.55); display: block;
+.ps-title-line { display:flex; align-items:center; gap:6px; }
+.ps-title-poe  { font-size:13px; font-weight:500; color:#00B4FF; letter-spacing:.3px; text-shadow:0 0 20px rgba(0,180,255,.25); }
+.ps-title-sep  { color:rgba(255,255,255,.2); font-size:12px; }
+.ps-title-label { font-size:12px; font-weight:500; color:#7E92AB; }
+
+.ps-net { width:7px; height:7px; border-radius:50%; margin:0 2px; flex-shrink:0; }
+.ps-net--on  { background:#00E676; animation:netGlow 2.5s ease-in-out infinite; box-shadow:0 0 8px rgba(0,230,118,.4); }
+.ps-net--off { background:#FF3D71; box-shadow:0 0 6px rgba(255,61,113,.3); }
+
+.ps-hbtn {
+  width:44px; height:44px; border-radius:10px; position:relative;
+  background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.08);
+  display:flex; align-items:center; justify-content:center; cursor:pointer;
+  transition:all .15s cubic-bezier(.16,1,.3,1);
+  -webkit-tap-highlight-color:transparent;
 }
-.ps-page-title {
-  font-size: 19px; font-weight: 800; color: #fff;
-  letter-spacing: -.3px; line-height: 1.15;
-}
-.ps-hdr-actions { display: flex; align-items: center; gap: 7px; }
-.ps-hact {
-  height: 36px; border-radius: 18px;
-  background: rgba(255,255,255,0.12); border: 1px solid rgba(255,255,255,0.18);
-  display: flex; align-items: center; gap: 6px; padding: 0 12px;
-  position: relative; cursor: pointer;
-}
-.ps-hact svg { width: 15px; height: 15px; }
-.ps-hact-txt { font-size: 11px; font-weight: 700; color: rgba(255,255,255,0.9); }
-.ps-hact--alert { background: rgba(245,158,11,0.25); border-color: rgba(245,158,11,0.5); }
-.ps-hact--syncing { opacity: 0.7; }
+.ps-hbtn:active { transform:scale(.93); }
+.ps-hbtn svg { width:16px; height:16px; stroke:rgba(255,255,255,.65); }
+.ps-hbtn--alert { border-color:rgba(224,32,80,.3); background:rgba(224,32,80,.1); }
+.ps-hbtn--alert svg { stroke:#FF3D71; }
 .ps-hbadge {
-  position: absolute; top: -5px; right: -5px;
-  background: #F59E0B; color: #000;
-  font-size: 9px; font-weight: 900;
-  min-width: 16px; height: 16px; border-radius: 8px;
-  display: flex; align-items: center; justify-content: center;
-  padding: 0 3px; border: 2px solid #1565C0;
+  position:absolute; top:-4px; right:-4px;
+  background:linear-gradient(135deg,#B01840,#E02050); color:#fff; font-size:8px; font-weight:800;
+  min-width:14px; height:14px; border-radius:7px;
+  display:flex; align-items:center; justify-content:center;
+  padding:0 3px; border:1.5px solid #070E1B;
+  box-shadow:0 0 8px rgba(224,32,80,.35);
 }
-.ps-hbadge--warn { background: #F59E0B; }
+.ps-hbadge--amber { background:linear-gradient(135deg,#CC8800,#E6A000); }
 
-/* Session stats strip */
-.ps-session-strip {
-  display: grid; grid-template-columns: repeat(4,1fr);
-  margin: 0 16px 14px;
-  background: rgba(255,255,255,0.1);
-  border-radius: 14px; border: 1px solid rgba(255,255,255,0.15);
-  overflow: hidden; position: relative; z-index: 2;
-}
-.ps-ss-cell {
-  padding: 9px 4px 8px; text-align: center; position: relative;
-}
-.ps-ss-cell:not(:last-child)::after {
-  content: ''; position: absolute; right: 0; top: 20%; height: 60%; width: 1px;
-  background: rgba(255,255,255,0.15);
-}
-.ps-ss-n {
-  display: block; font-size: 22px; font-weight: 800; color: #fff;
-  line-height: 1; letter-spacing: -.5px;
-}
-.ps-ss-l {
-  display: block; font-size: 8.5px; font-weight: 700;
-  text-transform: uppercase; letter-spacing: .8px;
-  color: rgba(255,255,255,0.5); margin-top: 2px;
-}
-.ps-ss-n--symptom { color: #FFB74D; }
-.ps-ss-n--ok      { color: #81C784; }
-.ps-ss-n--warn    { color: #FFF176; }
+/* Below toolbar — stats + tabs */
+.ps-below-toolbar { background:linear-gradient(180deg,#0E1A2E 0%,#142640 100%); }
 
-/* POE context bar */
-.ps-poe-bar {
-  display: flex; align-items: center; gap: 8px;
-  padding: 9px 16px 10px; position: relative; z-index: 2;
-}
-.ps-poe-ic {
-  width: 28px; height: 28px; border-radius: 8px;
-  background: rgba(255,255,255,0.12);
-  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
-}
-.ps-poe-ic svg { width: 14px; height: 14px; }
-.ps-poe-info { flex: 1; }
-.ps-poe-title { font-size: 12.5px; font-weight: 700; color: #fff; }
-.ps-poe-sub   { font-size: 10px; color: rgba(255,255,255,0.55); margin-top: 1px; }
-.ps-conn-pill {
-  display: flex; align-items: center; gap: 5px;
-  padding: 4px 10px; border-radius: 20px; border: 1px solid;
-}
-.ps-conn--online  { background: rgba(129,199,132,0.15); border-color: rgba(129,199,132,0.3); }
-.ps-conn--offline { background: rgba(158,158,158,0.15); border-color: rgba(158,158,158,0.3); }
-.ps-cp-dot { width: 6px; height: 6px; border-radius: 50%; }
-.ps-cp-dot--on  { background: #81C784; animation: ps-cpulse 2s infinite; }
-.ps-cp-dot--off { background: #9E9E9E; }
-@keyframes ps-cpulse { 0%,100%{opacity:1} 50%{opacity:.4} }
-.ps-cp-txt { font-size: 10px; font-weight: 700; letter-spacing: .3px; color: #81C784; }
-.ps-conn--offline .ps-cp-txt { color: #9E9E9E; }
+/* Stats strip */
+.ps-stats   { display:flex; align-items:center; padding:8px 16px; border-bottom:1px solid rgba(255,255,255,.06); }
+.ps-s       { display:flex; flex-direction:column; align-items:center; flex:1; }
+.ps-s-n     { font-size:18px; font-weight:800; color:#EDF2FA; line-height:1; letter-spacing:-1px; }
+.ps-s-l     { font-size:7px; font-weight:700; color:#7E92AB; text-transform:uppercase; letter-spacing:1.2px; margin-top:2px; }
+.ps-s-n--green { color:#00E676; text-shadow:0 0 20px rgba(0,230,118,.25); }
+.ps-s-n--amber { color:#FFB300; text-shadow:0 0 20px rgba(255,179,0,.25); }
+.ps-s-n--red   { color:#FF3D71; text-shadow:0 0 20px rgba(255,61,113,.25); }
+.ps-sdiv { width:1px; height:22px; background:rgba(255,255,255,.06); margin:0 2px; }
 
 /* Tabs */
-.ps-tabs {
-  display: flex; border-top: 1px solid rgba(255,255,255,0.15);
-  position: relative; z-index: 2;
+.ps-tabs { display:flex; }
+.ps-tab  {
+  flex:1; padding:10px 0; font-size:11px; font-weight:600; color:#7E92AB;
+  border:none; background:transparent; cursor:pointer; position:relative;
+  letter-spacing:.3px; transition:color .2s;
+  -webkit-tap-highlight-color:transparent;
 }
-.ps-tab {
-  flex: 1; height: 40px; border: none; background: transparent;
-  font-size: 12px; font-weight: 700; color: rgba(255,255,255,0.6);
-  letter-spacing: .3px; cursor: pointer; position: relative;
-  display: flex; align-items: center; justify-content: center; gap: 5px;
+.ps-tab--on { color:#EDF2FA; }
+.ps-tab--on::after {
+  content:''; position:absolute; bottom:0; left:20%; right:20%;
+  height:2px; background:#00B4FF; border-radius:1px;
+  box-shadow:0 0 8px rgba(0,180,255,.4);
 }
-.ps-tab--active { color: #fff; }
-.ps-tab--active::after {
-  content: ''; position: absolute; bottom: 0; left: 15%; right: 15%;
-  height: 2px; background: #fff; border-radius: 2px 2px 0 0;
-}
-.ps-tab-badge {
-  background: #F59E0B; color: #000;
-  font-size: 9px; font-weight: 900;
-  min-width: 16px; height: 16px; border-radius: 8px;
-  display: inline-flex; align-items: center; justify-content: center;
-  padding: 0 3px;
+.ps-tab-dot {
+  display:inline-block; width:5px; height:5px; border-radius:50%;
+  background:#FF3D71; margin-left:4px; vertical-align:middle;
+  animation:dotPulse 1.5s ease-in-out infinite;
 }
 
-/* ── CONTENT AREA ── */
-.ps-content { --background: #EEF2FF; }
+/* ═══════════════════════════════════════════════════════════════
+   LIGHT ZONE — Content (--page-1/2/3)
+═══════════════════════════════════════════════════════════════ */
+.ps-content {
+  --background: linear-gradient(180deg, #EAF0FA 0%, #F2F5FB 40%, #E4EBF7 100%);
+  --color: #0B1A30;
+  overflow-x: hidden;
+}
+.ps-spin    { animation: spin .85s linear infinite; }
 
-/* ── PERMISSION GUARD ── */
-.ps-guard-banner {
-  margin: 14px; border-radius: 14px;
-  background: linear-gradient(135deg, #FFEBEE, #FFCDD2);
-  border: 1px solid #FFCDD2;
-  padding: 14px; display: flex; align-items: flex-start; gap: 12px;
+/* Guard */
+.ps-guard {
+  display:flex; align-items:flex-start; gap:12px; margin:16px;
+  padding:14px; background:#FEF2F2; border:1px solid rgba(224,32,80,.2);
+  border-radius:10px;
 }
-.ps-guard-icon {
-  width: 36px; height: 36px; border-radius: 10px; background: #C62828;
-  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
-}
-.ps-guard-icon svg { width: 18px; height: 18px; }
-.ps-guard-title { font-size: 13px; font-weight: 800; color: #B71C1C; margin-bottom: 2px; }
-.ps-guard-sub   { font-size: 11px; color: #C62828; }
+.ps-guard-ic    { font-size:20px; flex-shrink:0; }
+.ps-guard-title { font-size:13px; font-weight:700; color:#B01840; margin-bottom:2px; }
+.ps-guard-sub   { font-size:11px; color:#64748B; line-height:1.4; }
 
-/* ── AUTH STRIP ── */
-.ps-auth-strip {
-  margin: 14px 14px 0;
-  background: linear-gradient(135deg, #E3F2FD, #EDE7F6);
-  border: 1px solid #BBDEFB; border-radius: 16px;
-  padding: 11px 14px; display: flex; align-items: center; gap: 10px;
+/* ═══════════════════════════════════════════════════════════════
+   CAPTURE — single-viewport layout
+═══════════════════════════════════════════════════════════════ */
+.ps-capture {
+  display:flex;
+  flex-direction:column;
+  gap:0;
+  padding:0;
+  min-height:100%;
+  overflow-x:hidden;
+  overflow-y:auto;
+  max-width:100%;
 }
-.ps-auth-icon {
-  width: 36px; height: 36px; border-radius: 12px; background: #1565C0;
-  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
-}
-.ps-auth-icon svg { width: 18px; height: 18px; }
-.ps-auth-info { flex: 1; }
-.ps-auth-title { font-size: 12px; font-weight: 700; color: #0D1B3E; }
-.ps-auth-sub   { font-size: 10.5px; color: #546E7A; margin-top: 1px; }
-.ps-auth-check {
-  width: 28px; height: 28px; border-radius: 50%;
-  background: #E8F5E9; border: 2px solid #A5D6A7;
-  display: flex; align-items: center; justify-content: center;
-}
-.ps-auth-check svg { width: 13px; height: 13px; }
-
-/* ── SECTION HEADERS ── */
-.ps-sec-hdr {
-  display: flex; align-items: center; gap: 8px;
-  padding: 16px 14px 8px;
-}
-.ps-sec-num {
-  width: 22px; height: 22px; border-radius: 50%; background: #1565C0;
-  display: flex; align-items: center; justify-content: center;
-  font-size: 11px; font-weight: 800; color: #fff; flex-shrink: 0;
-}
-.ps-sec-num--opt  { background: #78909C; }
-.ps-sec-num--crit { background: #C62828; }
-.ps-sec-title { font-size: 14px; font-weight: 700; color: #0D1B3E; letter-spacing: -.1px; }
-.ps-sec-title--crit { color: #B71C1C; }
-.ps-sec-badge {
-  font-size: 10px; font-weight: 700; padding: 2px 7px;
-  border-radius: 6px; margin-left: auto; border: 1px solid;
-}
-.ps-sec-badge--req  { color: #E53935; background: #FFEBEE; border-color: #FFCDD2; }
-.ps-sec-badge--opt  { color: #78909C; background: #ECEFF1; border-color: #CFD8DC; }
-.ps-sec-badge--crit { color: #B71C1C; background: #FFEBEE; border-color: #FFCDD2; }
-
-/* ── GENDER BUTTONS ── */
-.ps-gender-grid {
-  display: grid; grid-template-columns: 1fr 1fr;
-  gap: 8px; margin: 0 14px;
-}
-.ps-gender-btn {
-  height: 72px; border-radius: 18px; border: 2px solid #E0E0E0;
-  background: #FAFAFA;
-  display: flex; flex-direction: column; align-items: center; justify-content: center;
-  gap: 5px; cursor: pointer; position: relative; overflow: hidden;
-  transition: all .15s; -webkit-tap-highlight-color: transparent;
-}
-.ps-gender-btn:active { transform: scale(.97); }
-.ps-gb-icon {
-  width: 26px; height: 26px; border-radius: 8px;
-  display: flex; align-items: center; justify-content: center;
-}
-.ps-gb-icon :deep(svg) { width: 16px; height: 16px; }
-.ps-gb-lbl { font-size: 12px; font-weight: 800; letter-spacing: .5px; text-transform: uppercase; }
-.ps-gb-check { position: absolute; top: 6px; right: 9px; font-size: 13px; font-weight: 900; }
-
-/* Male */
-.ps-gb--male                 { background: #FAFAFA; border-color: #E0E0E0; }
-.ps-gb--male .ps-gb-icon     { background: #E3F2FD; }
-.ps-gb--male .ps-gb-lbl      { color: #1565C0; }
-.ps-gb--male.ps-gb--selected { background: linear-gradient(145deg,#E3F2FD,#BBDEFB); border-color: #1565C0; box-shadow: 0 0 0 3px rgba(21,101,192,0.15); }
-.ps-gb--male.ps-gb--selected .ps-gb-icon { background: #1565C0; }
-.ps-gb--male.ps-gb--selected .ps-gb-check { color: #1565C0; }
-
-/* Female */
-.ps-gb--female                 { background: #FAFAFA; border-color: #E0E0E0; }
-.ps-gb--female .ps-gb-icon     { background: #F3E5F5; }
-.ps-gb--female .ps-gb-lbl      { color: #6A1B9A; }
-.ps-gb--female.ps-gb--selected { background: linear-gradient(145deg,#F3E5F5,#E1BEE7); border-color: #7B1FA2; box-shadow: 0 0 0 3px rgba(123,31,162,0.12); }
-.ps-gb--female.ps-gb--selected .ps-gb-icon { background: #7B1FA2; }
-.ps-gb--female.ps-gb--selected .ps-gb-check { color: #7B1FA2; }
-
-/* Other */
-.ps-gb--other                 { background: #FAFAFA; border-color: #E0E0E0; }
-.ps-gb--other .ps-gb-icon     { background: #FFF3E0; }
-.ps-gb--other .ps-gb-lbl      { color: #BF360C; }
-.ps-gb--other.ps-gb--selected { background: linear-gradient(145deg,#FFF3E0,#FFE0B2); border-color: #E65100; box-shadow: 0 0 0 3px rgba(230,81,0,0.12); }
-.ps-gb--other.ps-gb--selected .ps-gb-icon { background: #E65100; }
-.ps-gb--other.ps-gb--selected .ps-gb-check { color: #E65100; }
-
-/* Unknown */
-.ps-gb--unknown                 { background: #FAFAFA; border-color: #E0E0E0; }
-.ps-gb--unknown .ps-gb-icon     { background: #ECEFF1; }
-.ps-gb--unknown .ps-gb-lbl      { color: #546E7A; }
-.ps-gb--unknown.ps-gb--selected { background: linear-gradient(145deg,#ECEFF1,#CFD8DC); border-color: #546E7A; box-shadow: 0 0 0 3px rgba(84,110,122,0.12); }
-.ps-gb--unknown.ps-gb--selected .ps-gb-icon { background: #546E7A; }
-.ps-gb--unknown.ps-gb--selected .ps-gb-check { color: #546E7A; }
-
-/* IHR note */
-.ps-ihr-note {
-  margin: 7px 14px 0;
-  background: #EDE7F6; border: 1px solid #CE93D8; border-radius: 10px;
-  padding: 6px 10px; display: flex; align-items: center; gap: 6px;
-}
-.ps-ihr-note svg { width: 12px; height: 12px; flex-shrink: 0; }
-.ps-ihr-txt { font-size: 10px; font-weight: 500; color: #4A148C; }
-
-/* Field error */
-.ps-field-error {
-  display: flex; align-items: center; gap: 6px;
-  margin: 5px 14px 0;
-  font-size: 11px; font-weight: 600; color: #C62828;
-}
-.ps-field-error svg { width: 12px; height: 12px; flex-shrink: 0; }
-
-/* ── NAME INPUT ── */
-.ps-input-row { margin: 0 14px; }
-.ps-input-wrap {
-  background: #fff; border: 1.5px solid #CFD8E8;
-  border-radius: 14px; display: flex; align-items: center;
-  gap: 10px; padding: 0 14px; height: 52px;
-  transition: border-color .2s;
-}
-.ps-input-wrap--active { border-color: #1565C0; box-shadow: 0 0 0 3px rgba(21,101,192,0.08); }
-.ps-input-wrap svg { width: 17px; height: 17px; flex-shrink: 0; }
-.ps-input {
-  flex: 1; border: none; outline: none; background: transparent;
-  font-size: 14.5px; color: #0D1B3E; font-weight: 400;
-}
-.ps-input::placeholder { color: #90A4AE; }
-.ps-input-count { font-size: 11px; font-weight: 600; color: #B0BEC5; }
-
-/* ── TEMPERATURE ── */
-.ps-temp-row { display: grid; grid-template-columns: 1fr auto auto; gap: 8px; margin: 0 14px; }
-.ps-temp-input {
-  background: #fff; border: 1.5px solid #BBDEFB;
-  border-radius: 14px; display: flex; align-items: center;
-  gap: 10px; padding: 0 14px; height: 52px;
-  transition: border-color .2s, box-shadow .2s;
-}
-.ps-temp-input--active { border-color: #1565C0; box-shadow: 0 0 0 3px rgba(21,101,192,0.08); }
-.ps-temp-input--warn   { border-color: #E65100; }
-.ps-temp-input--danger { border-color: #C62828; }
-.ps-temp-input svg { width: 17px; height: 17px; flex-shrink: 0; }
-.ps-temp-val {
-  flex: 1; border: none; outline: none; background: transparent;
-  font-size: 24px; font-weight: 800; color: #0D47A1;
-  width: 100%;
-}
-.ps-temp-val::placeholder { color: #B0BEC5; font-size: 20px; }
-/* Remove number input spinner */
-.ps-temp-val::-webkit-inner-spin-button,
-.ps-temp-val::-webkit-outer-spin-button { -webkit-appearance: none; }
-.ps-temp-val { -moz-appearance: textfield; }
-
-.ps-temp-unit { display: flex; flex-direction: column; gap: 4px; }
-.ps-tut-btn {
-  width: 46px; height: 24px; border-radius: 8px;
-  display: flex; align-items: center; justify-content: center;
-  font-size: 11.5px; font-weight: 800; letter-spacing: .3px; cursor: pointer;
-  border: none;
-}
-.ps-tut--active   { background: #1565C0; color: #fff; }
-.ps-tut--inactive { background: #E3F2FD; color: #90A4AE; border: 1px solid #BBDEFB; }
-
-.ps-temp-clear {
-  width: 52px; height: 52px; border-radius: 14px;
-  background: #ECEFF1; border: 1.5px solid #CFD8DC;
-  display: flex; align-items: center; justify-content: center; cursor: pointer;
-}
-.ps-temp-clear svg { width: 14px; height: 14px; }
-
-/* Temp warning */
-.ps-temp-warning {
-  margin: 6px 14px 0; border-radius: 10px; padding: 7px 11px;
-  display: flex; align-items: center; gap: 7px;
-}
-.ps-tw--normal { background: #E8F5E9; border: 1px solid #A5D6A7; }
-.ps-tw--warn   { background: #FFF8E1; border: 1px solid #FFE082; }
-.ps-tw--danger { background: #FFEBEE; border: 1px solid #FFCDD2; }
-.ps-tw-icon { width: 14px; height: 14px; flex-shrink: 0; }
-.ps-tw-icon :deep(svg) { width: 14px; height: 14px; }
-.ps-tw-txt { font-size: 11px; font-weight: 600; }
-.ps-tw--normal .ps-tw-txt { color: #1B5E20; }
-.ps-tw--warn   .ps-tw-txt { color: #E65100; }
-.ps-tw--danger .ps-tw-txt { color: #B71C1C; }
-
-/* Temp scale */
-.ps-temp-scale {
-  margin: 7px 14px 0;
-  background: #fff; border: 1px solid #E3EAF8; border-radius: 12px;
-  padding: 10px 12px;
-}
-.ps-ts-label { font-size: 9.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .8px; color: #90A4AE; margin-bottom: 7px; }
-.ps-ts-track {
-  height: 8px; border-radius: 4px;
-  background: linear-gradient(90deg, #90CAF9 0%, #42A5F5 25%, #1E88E5 40%, #43A047 50%, #FFA726 70%, #EF5350 85%, #B71C1C 100%);
-  position: relative; overflow: visible;
-}
-.ps-ts-thumb {
-  position: absolute; top: 50%; transform: translate(-50%, -50%);
-  width: 14px; height: 14px; border-radius: 50%;
-  background: #1565C0; border: 2.5px solid #fff;
-  box-shadow: 0 2px 6px rgba(0,0,0,0.25);
-  transition: left .2s;
-}
-.ps-ts-labels { display: flex; justify-content: space-between; margin-top: 5px; }
-.ps-ts-lbl { font-size: 8.5px; color: #B0BEC5; font-weight: 600; }
-
-/* Divider */
-.ps-divider { height: 1px; background: #E3EAF8; margin: 12px 14px 0; }
-
-/* ── SYMPTOMS SECTION ── */
-.ps-symptom-section { margin: 0 14px; }
-.ps-symptom-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-.ps-sym-btn {
-  border-radius: 22px; padding: 20px 12px 18px;
-  display: flex; flex-direction: column; align-items: center;
-  gap: 10px; border: 2px solid; cursor: pointer;
-  position: relative; overflow: hidden;
-  -webkit-tap-highlight-color: transparent;
-  transition: all .15s;
-}
-.ps-sym-btn:active { transform: scale(.97); }
-.ps-sym-btn::before {
-  content: ''; position: absolute; inset: 0; border-radius: 22px;
-  background: linear-gradient(145deg, rgba(255,255,255,0.3) 0%, transparent 60%);
-  pointer-events: none;
-}
-.ps-sym-icon {
-  width: 52px; height: 52px; border-radius: 16px;
-  display: flex; align-items: center; justify-content: center;
-}
-.ps-sym-icon svg { width: 28px; height: 28px; }
-.ps-sym-lbl  { font-size: 16px; font-weight: 800; letter-spacing: -.2px; }
-.ps-sym-sub  { font-size: 10px; font-weight: 500; text-align: center; line-height: 1.3; letter-spacing: .1px; }
-.ps-sym-check { position: absolute; top: 10px; right: 12px; font-size: 16px; font-weight: 900; color: #2E7D32; }
-
-/* NO — not selected */
-.ps-sym--no-unsel { background: #FAFAFA; border-color: #E0E0E0; }
-.ps-sym--no-unsel .ps-sym-icon { background: #ECEFF1; }
-/* NO — selected */
-.ps-sym--no-sel { background: linear-gradient(145deg,#E8F5E9,#C8E6C9); border-color: #2E7D32; box-shadow: 0 4px 16px rgba(46,125,50,0.2); }
-.ps-sym--no-sel .ps-sym-icon--ok { background: #2E7D32; }
-/* YES — not selected */
-.ps-sym--yes-unsel { background: #FAFAFA; border-color: #E0E0E0; }
-.ps-sym--yes-unsel .ps-sym-icon { background: #ECEFF1; }
-/* YES — selected */
-.ps-sym--yes-sel { background: linear-gradient(145deg,#FFEBEE,#FFCDD2); border-color: #C62828; box-shadow: 0 4px 16px rgba(198,40,40,0.2); }
-.ps-sym--yes-sel .ps-sym-icon--red { background: #C62828; }
-/* Dim icons for unselected */
-.ps-sym-icon--ok-dim  { background: #E8F5E9; }
-.ps-sym-icon--red-dim { background: #FFEBEE; }
-
-/* IHR symptom note */
-.ps-sym-ihr-note {
-  margin-top: 8px;
-  background: #FFF8E1; border: 1px solid #FFE082; border-radius: 12px;
-  padding: 9px 12px; display: flex; align-items: flex-start; gap: 8px;
-}
-.ps-sin-icon {
-  width: 28px; height: 28px; border-radius: 8px;
-  background: #FFF3E0; border: 1px solid #FFCC02;
-  display: flex; align-items: center; justify-content: center; flex-shrink: 0; margin-top: 1px;
-}
-.ps-sin-icon svg { width: 14px; height: 14px; }
-.ps-sin-title { font-size: 11.5px; font-weight: 700; color: #E65100; }
-.ps-sin-sub   { font-size: 10px; color: #F57C00; margin-top: 2px; line-height: 1.4; }
-
-/* Referral preview */
-.ps-referral-preview {
-  margin-top: 8px; background: #fff;
-  border: 1.5px solid #FFCDD2; border-radius: 16px; overflow: hidden;
-}
-.ps-rp-header {
-  padding: 11px 14px; display: flex; align-items: center; gap: 8px;
-}
-.ps-rp-header--normal   { background: linear-gradient(135deg,#1565C0,#1976D2); }
-.ps-rp-header--high     { background: linear-gradient(135deg,#E65100,#F57C00); }
-.ps-rp-header--critical { background: linear-gradient(135deg,#C62828,#D32F2F); }
-.ps-rp-header svg { width: 16px; height: 16px; }
-.ps-rp-h-title { font-size: 12px; font-weight: 800; color: #fff; letter-spacing: .2px; }
-.ps-rp-h-badge {
-  margin-left: auto; padding: 3px 9px; border-radius: 6px;
-  background: rgba(255,255,255,0.2); border: 1px solid rgba(255,255,255,0.3);
-  font-size: 9px; font-weight: 800; color: #fff; letter-spacing: .5px; text-transform: uppercase;
-}
-.ps-rp-badge--normal   { background: rgba(255,255,255,0.15); }
-.ps-rp-badge--high     { background: rgba(255,213,79,0.3); color: #FFF9C4; }
-.ps-rp-badge--critical { background: rgba(255,205,210,0.3); color: #FFCDD2; }
-.ps-rp-body { padding: 11px 14px; }
-.ps-rp-row  { display: flex; align-items: center; justify-content: space-between; margin-bottom: 7px; }
-.ps-rp-row:last-child { margin-bottom: 0; }
-.ps-rp-k { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .5px; color: #90A4AE; }
-.ps-rp-v { font-size: 12px; font-weight: 700; color: #0D1B3E; }
-.ps-rp-v--crit { color: #B71C1C; }
-.ps-rp-v--high { color: #E65100; }
-
-/* ── CAPTURE BUTTON ── */
-.ps-capture-section { margin: 12px 14px 0; }
-.ps-capture-btn {
-  width: 100%; height: 64px;
-  background: linear-gradient(135deg, #0D47A1 0%, #1565C0 40%, #1976D2 100%);
-  border: none; border-radius: 20px;
-  display: flex; align-items: center; justify-content: center; gap: 12px;
-  cursor: pointer; position: relative; overflow: hidden;
-  box-shadow: 0 8px 24px rgba(13,71,161,0.35), 0 3px 8px rgba(0,0,0,0.15);
-  transition: transform .15s, box-shadow .15s;
-  -webkit-tap-highlight-color: transparent;
-}
-.ps-capture-btn::before {
-  content: ''; position: absolute; inset: 0;
-  background: linear-gradient(180deg, rgba(255,255,255,0.12) 0%, transparent 60%);
-}
-.ps-capture-btn:not(.ps-capture-btn--disabled):active { transform: scale(.98); }
-.ps-capture-btn--symptomatic {
-  background: linear-gradient(135deg, #C62828 0%, #D32F2F 50%, #E53935 100%);
-  box-shadow: 0 8px 24px rgba(198,40,40,0.4), 0 3px 8px rgba(0,0,0,0.15);
-}
-.ps-capture-btn--disabled { opacity: .5; cursor: not-allowed; }
-.ps-capture-btn--loading  { opacity: .85; cursor: wait; }
-.ps-cb-icon {
-  width: 36px; height: 36px; border-radius: 12px;
-  background: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.2);
-  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
-  position: relative; z-index: 1;
-}
-.ps-cb-icon svg { width: 20px; height: 20px; }
-.ps-cb-text { position: relative; z-index: 1; text-align: left; }
-.ps-cb-main {
-  font-size: 17px; font-weight: 800; color: #fff;
-  letter-spacing: .2px; display: block;
-}
-.ps-cb-sub {
-  font-size: 10px; font-weight: 500; color: rgba(255,255,255,0.65);
-  display: block; margin-top: 1px; letter-spacing: .5px; text-transform: uppercase;
-}
-.ps-cb-shortcut {
-  margin-left: auto; position: relative; z-index: 1;
-  background: rgba(255,255,255,0.12); border: 1px solid rgba(255,255,255,0.2);
-  border-radius: 8px; padding: 4px 8px;
-  font-size: 11px; font-weight: 700; color: rgba(255,255,255,0.7);
-}
-.ps-capture-hint {
-  text-align: center; margin-top: 7px;
-  font-size: 11px; font-weight: 600; color: #90A4AE;
-}
-
-/* ── SUCCESS TOAST ── */
-.ps-success-area { margin: 10px 14px 0; }
-.ps-success-toast {
-  border-radius: 16px; padding: 13px 14px;
-  display: flex; align-items: center; gap: 10px;
-  border: 1.5px solid;
-}
-.ps-success-toast--ok      { background: linear-gradient(135deg,#E8F5E9,#C8E6C9); border-color: #81C784; }
-.ps-success-toast--referral { background: linear-gradient(135deg,#FFF8E1,#FFE082); border-color: #FFB74D; }
-.ps-st-icon {
-  width: 36px; height: 36px; border-radius: 12px;
-  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
-}
-.ps-st-icon svg    { width: 20px; height: 20px; }
-.ps-st-icon--ok    { background: #2E7D32; }
-.ps-st-icon--ref   { background: #E65100; }
-.ps-st-info { flex: 1; }
-.ps-st-title { font-size: 13px; font-weight: 800; color: #1B5E20; }
-.ps-success-toast--referral .ps-st-title { color: #E65100; }
-.ps-st-sub   { font-size: 10.5px; color: #388E3C; margin-top: 2px; }
-.ps-success-toast--referral .ps-st-sub { color: #F57C00; }
-.ps-st-sync  { font-weight: 800; }
-.ps-st-counter {
-  margin-left: auto; text-align: center;
-  background: rgba(255,255,255,0.6); border-radius: 10px; padding: 5px 10px;
-}
-.ps-st-count-n { font-size: 22px; font-weight: 800; color: #1B5E20; display: block; line-height: 1; }
-.ps-success-toast--referral .ps-st-count-n { color: #E65100; }
-.ps-st-count-l { font-size: 8.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .8px; color: #388E3C; }
-.ps-success-toast--referral .ps-st-count-l { color: #F57C00; }
-
-/* Post-capture action row */
-.ps-void-row { display: flex; gap: 8px; margin: 8px 0 0; }
-.ps-void-btn {
-  flex: 1; height: 40px; border-radius: 12px;
-  background: #FAFAFA; border: 1.5px solid #ECEFF1;
-  display: flex; align-items: center; justify-content: center; gap: 6px; cursor: pointer;
-}
-.ps-void-btn svg { width: 14px; height: 14px; }
-.ps-void-btn-txt { font-size: 12px; font-weight: 700; color: #546E7A; }
-.ps-next-btn {
-  flex: 1; height: 40px; border-radius: 12px;
-  background: #E3F2FD; border: 1.5px solid #BBDEFB;
-  display: flex; align-items: center; justify-content: center; gap: 6px; cursor: pointer;
-}
-.ps-next-btn svg { width: 14px; height: 14px; }
-.ps-next-btn-txt { font-size: 12px; font-weight: 700; color: #1565C0; }
 
 /* Sync error */
-.ps-sync-error {
-  margin: 10px 14px 0;
-  background: #FFEBEE; border: 1px solid #FFCDD2; border-radius: 12px;
-  padding: 10px 14px; display: flex; align-items: flex-start; gap: 10px;
+.ps-sync-err {
+  display:flex; align-items:center; justify-content:space-between;
+  padding:8px 14px; background:#FEF2F2; border-bottom:1px solid rgba(224,32,80,.15);
+  font-size:11px; font-weight:600; color:#B01840;
 }
-.ps-sync-error svg { width: 16px; height: 16px; flex-shrink: 0; margin-top: 1px; }
-.ps-sync-error-title { font-size: 12px; font-weight: 700; color: #B71C1C; }
-.ps-sync-error-sub   { font-size: 10.5px; color: #C62828; margin-top: 2px; line-height: 1.4; }
-.ps-sync-error-dismiss {
-  margin-left: auto; background: none; border: none;
-  font-size: 14px; color: #90A4AE; cursor: pointer; flex-shrink: 0;
+.ps-sync-err button { background:none; border:none; color:#B01840; cursor:pointer; font-size:15px; padding:2px 4px; }
+
+/* ── Field row — premium card surface ── */
+.ps-field-row {
+  padding:10px 16px 9px;
+  border-bottom:1px solid rgba(0,0,0,.04);
+  background:linear-gradient(145deg, #FFFFFF 0%, #F4F7FC 100%);
+  display:flex; align-items:center; gap:10px; flex-wrap:wrap;
+  flex-shrink:0;
+  animation:slideUp .5s cubic-bezier(.16,1,.3,1) both;
+}
+.ps-field-row--temp-wrap {
+  flex-direction:column; align-items:stretch; gap:4px; flex-wrap:nowrap;
+}
+.ps-temp-top {
+  display:flex; align-items:center; gap:8px; min-width:0;
+}
+.ps-field-lbl {
+   font-size:9px; font-weight:700; color:#94A3B8;
+  text-transform:uppercase; letter-spacing:1.2px;
+  white-space:nowrap; min-width:58px;
+}
+.ps-lbl-opt { font-size:9px; font-weight:500; color:#94A3B8; text-transform:none; letter-spacing:0; }
+.ps-ferr    { font-size:10px; font-weight:600; color:#E02050; padding:4px 0 0; line-height:1.3; word-wrap:break-word; overflow-wrap:break-word; }
+.ps-fwarn   { font-size:10px; font-weight:600; color:#CC8800; padding:4px 0 0; line-height:1.3; word-wrap:break-word; overflow-wrap:break-word; }
+
+/* ── DIRECTION pills ── */
+.ps-dir-pills { display:flex; gap:6px; flex:1; }
+.ps-dir-pill {
+  flex:1; padding:8px 0; border-radius:10px;  font-size:12px; font-weight:600;
+  border:1.5px solid rgba(0,0,0,.06); background:linear-gradient(145deg,#FFFFFF,#F4F7FC); color:#475569;
+  cursor:pointer; text-align:center; transition:all .15s cubic-bezier(.16,1,.3,1);
+  min-height:44px; -webkit-tap-highlight-color:transparent;
+  box-shadow:0 1px 3px rgba(0,0,0,.03);
+}
+.ps-dir-pill:active { transform:scale(.96); }
+.ps-dir-pill--entry   { border-color:rgba(0,112,224,.3); background:linear-gradient(135deg,#E0ECFF,#CCE0FF); color:#0070E0; box-shadow:0 2px 8px rgba(0,112,224,.1); }
+.ps-dir-pill--exit    { border-color:rgba(204,136,0,.2); background:linear-gradient(135deg,#FFFBEB,#FEF3C7); color:#CC8800; box-shadow:0 2px 8px rgba(204,136,0,.1); }
+.ps-dir-pill--transit { border-color:rgba(123,64,216,.2); background:linear-gradient(135deg,#F5F3FF,#EDE9FE); color:#7B40D8; box-shadow:0 2px 8px rgba(123,64,216,.1); }
+
+/* ── SEX pills ── */
+.ps-sex-pills { display:flex; gap:8px; flex:1; }
+.ps-sex-btn {
+  flex:1; padding:8px 0; border-radius:10px;  font-size:13px; font-weight:600;
+  border:1.5px solid rgba(0,0,0,.06); background:linear-gradient(145deg,#FFFFFF,#F4F7FC); color:#475569;
+  cursor:pointer; text-align:center; transition:all .15s cubic-bezier(.16,1,.3,1);
+  min-height:44px; -webkit-tap-highlight-color:transparent;
+  box-shadow:0 1px 3px rgba(0,0,0,.03);
+}
+.ps-sex-btn:active { transform:scale(.96); }
+.ps-sex-btn--m-active { border-color:rgba(0,112,224,.3); background:linear-gradient(135deg,#E0ECFF,#CCE0FF); color:#0070E0; box-shadow:0 4px 16px rgba(0,112,224,.15); }
+.ps-sex-btn--f-active { border-color:rgba(214,51,132,.2); background:linear-gradient(135deg,#FDF2F8,#FCE7F3); color:#D63384; box-shadow:0 4px 16px rgba(214,51,132,.15); }
+
+/* ── Temperature row ── */
+.ps-temp-row { display:flex; align-items:center; gap:6px; flex:1; min-width:0; flex-wrap:wrap; }
+.ps-temp-input-wrap {
+  display:flex; align-items:center; gap:4px;
+  background:linear-gradient(145deg,#E8EDF7,#F0F3FA); border:1.5px solid rgba(0,0,0,.08);
+  border-radius:10px; padding:0 10px; min-width:0; max-width:120px; flex-shrink:0;
+  transition:all .25s cubic-bezier(.16,1,.3,1);
+}
+.ps-temp-input-wrap--focus { border-color:rgba(0,112,224,.35); background:#fff; box-shadow:0 0 0 3px rgba(0,112,224,.08); }
+.ps-temp-input-wrap--warn  { border-color:rgba(204,136,0,.4); background:linear-gradient(135deg,#FFFBEB,#FEF3C7); }
+.ps-temp-input-wrap--crit  { border-color:rgba(224,32,80,.4); background:linear-gradient(135deg,#FEF2F2,#FECACA); }
+.ps-temp-input {
+  width:56px; background:transparent; border:none; outline:none;
+  font-size:18px; font-weight:800; color:#0B1A30; padding:7px 0;
+  -moz-appearance:textfield; min-width:0;
+}
+.ps-temp-input::-webkit-outer-spin-button,
+.ps-temp-input::-webkit-inner-spin-button { -webkit-appearance:none; }
+.ps-temp-input::placeholder { font-size:16px; color:#94A3B8; font-weight:400; }
+.ps-temp-unit-lbl { font-size:12px; font-weight:600; color:#94A3B8; flex-shrink:0; }
+.ps-unit-toggle { display:flex; border:1.5px solid rgba(0,0,0,.08); border-radius:8px; overflow:hidden; flex-shrink:0; }
+.ps-unit-btn {
+  padding:6px 10px; background:transparent; border:none;  font-size:11px; font-weight:700; color:#94A3B8; cursor:pointer;
+  transition:all .15s; min-height:36px;
+}
+.ps-unit-btn--on { background:linear-gradient(135deg,#070E1B,#0E1A2E); color:#EDF2FA; }
+.ps-temp-level { display:flex; align-items:center; gap:3px; font-size:9px; font-weight:600; color:#475569; white-space:nowrap; flex-shrink:0; }
+.ps-temp-level--warn { color:#CC8800; }
+.ps-temp-level--crit { color:#E02050; }
+.ps-temp-clear { background:none; border:none; color:#94A3B8; cursor:pointer; font-size:13px; padding:2px 4px; flex-shrink:0; }
+
+/* ── Fever auto-guard banner ── */
+.ps-fever-guard {
+  display:flex; gap:8px; align-items:flex-start;
+  margin:0; padding:8px 12px;
+  background:linear-gradient(135deg,#FFFBEB 0%,#FEF3C7 100%);
+  border-bottom:1px solid rgba(204,136,0,.15);
+  flex-shrink:0; max-width:100%; box-sizing:border-box;
+  animation:revealIn .3s cubic-bezier(.16,1,.3,1);
+}
+.ps-fever-guard svg { width:16px; height:16px; flex-shrink:0; margin-top:1px; }
+.ps-fever-guard-body { flex:1; min-width:0; }
+.ps-fever-guard-title { font-size:10px; font-weight:700; color:#CC8800; margin-bottom:2px; }
+.ps-fever-guard-text { font-size:10px; color:#475569; line-height:1.35; margin-bottom:5px; }
+.ps-fever-guard-actions { display:flex; gap:5px; flex-wrap:wrap; }
+.ps-fever-guard-btn {
+  padding:5px 10px; border-radius:6px; font-size:10px; font-weight:600; cursor:pointer; min-height:32px;
+  transition:all .15s; -webkit-tap-highlight-color:transparent;
+}
+.ps-fever-guard-btn--sym {
+  background:linear-gradient(135deg,#B01840,#E02050); color:#fff; border:none;
+}
+.ps-fever-guard-btn--clear {
+  background:#fff; color:#475569; border:1px solid rgba(0,0,0,.1);
 }
 
-/* ── TAB TOOLBAR ── */
-.ps-tab-toolbar {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 14px 14px 6px;
+/* ── WHO panel ── */
+.ps-who-panel {
+  background:linear-gradient(145deg,#FFFFFF,#F4F7FC);
+  border-bottom:1px solid rgba(0,0,0,.04);
+  flex-shrink:0;
 }
-.ps-tab-toolbar-title { font-size: 12px; font-weight: 700; color: #546E7A; }
-.ps-refresh-btn {
-  width: 32px; height: 32px; border-radius: 10px;
-  background: #E3F2FD; border: 1px solid #BBDEFB;
-  display: flex; align-items: center; justify-content: center; cursor: pointer;
+.ps-who-toggle {
+  display:flex; align-items:center; gap:7px; width:100%;
+  padding:8px 16px; border:none; background:transparent; cursor:pointer;
+  font-size:11px; font-weight:600; color:#0070E0; text-align:left;
+  -webkit-tap-highlight-color:transparent;
 }
-.ps-refresh-btn svg { width: 14px; height: 14px; }
-.ps-refresh-btn:disabled { opacity: .5; cursor: not-allowed; }
-
-/* Loading */
-.ps-loading {
-  display: flex; flex-direction: column; align-items: center;
-  gap: 12px; padding: 40px 20px; color: #90A4AE; font-size: 13px;
+.ps-who-toggle svg { width:13px; height:13px; flex-shrink:0; stroke:#0070E0; }
+.ps-who-chev { transition:transform .25s cubic-bezier(.16,1,.3,1); flex-shrink:0; }
+.ps-who-chev--open { transform:rotate(180deg); }
+.ps-acc-enter-active { transition:all .25s cubic-bezier(.16,1,.3,1); }
+.ps-acc-leave-active { transition:all .15s ease-in; }
+.ps-acc-enter-from,.ps-acc-leave-to { opacity:0; transform:translateY(-6px); max-height:0; overflow:hidden; }
+.ps-who-cats { padding:4px 16px 12px; display:flex; flex-direction:column; gap:8px; }
+.ps-who-cat  { display:flex; align-items:flex-start; gap:8px; }
+.ps-who-cat-label {
+  font-size:8px; font-weight:700; text-transform:uppercase;
+  letter-spacing:1.2px; color:#94A3B8; min-width:92px; padding-top:4px; flex-shrink:0;
 }
-.ps-loading-dots { display: flex; gap: 6px; }
-.ps-loading-dots div {
-  width: 8px; height: 8px; border-radius: 50%; background: #1565C0;
-  animation: ps-ldot 1.2s ease-in-out infinite;
-}
-.ps-loading-dots div:nth-child(2) { animation-delay: .2s; }
-.ps-loading-dots div:nth-child(3) { animation-delay: .4s; }
-@keyframes ps-ldot { 0%,80%,100%{transform:scale(.5);opacity:.3} 40%{transform:scale(1);opacity:1} }
-
-/* Empty state */
-.ps-empty {
-  display: flex; flex-direction: column; align-items: center;
-  gap: 8px; padding: 40px 20px; text-align: center;
-}
-.ps-empty svg { width: 40px; height: 40px; }
-.ps-empty-title { font-size: 14px; font-weight: 700; color: #546E7A; }
-.ps-empty-sub   { font-size: 12px; color: #90A4AE; }
-
-/* ── RECORDS LIST ── */
-.ps-records-list { padding: 0 14px; display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
-.ps-record-card {
-  background: #fff; border-radius: 14px;
-  border: 1.5px solid #E3EAF8;
-  padding: 11px 12px 11px 12px;
-  display: flex; align-items: center; gap: 10px;
-  transition: border-color .15s;
-}
-.ps-record-card--symptomatic { border-color: #FFCDD2; background: #FFFDE7; }
-.ps-record-card--voided      { opacity: .6; background: #FAFAFA; }
-.ps-rc-left { flex-shrink: 0; }
-.ps-rc-avatar {
-  width: 36px; height: 36px; border-radius: 10px;
-  display: flex; align-items: center; justify-content: center;
-}
-.ps-rc-avatar svg { width: 18px; height: 18px; }
-.ps-rc-avatar--male    { background: #E3F2FD; color: #1565C0; }
-.ps-rc-avatar--female  { background: #F3E5F5; color: #7B1FA2; }
-.ps-rc-avatar--other   { background: #FFF3E0; color: #E65100; }
-.ps-rc-avatar--unknown { background: #ECEFF1; color: #546E7A; }
-.ps-rc-body { flex: 1; min-width: 0; }
-.ps-rc-row1 { display: flex; align-items: center; justify-content: space-between; margin-bottom: 3px; }
-.ps-rc-name { font-size: 13px; font-weight: 700; color: #0D1B3E; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ps-rc-time { font-size: 11px; color: #90A4AE; flex-shrink: 0; margin-left: 8px; }
-.ps-rc-row2 { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; margin-bottom: 3px; }
-.ps-rc-row3 { display: flex; align-items: center; gap: 6px; }
-.ps-rc-temp { font-size: 11px; font-weight: 700; color: #1565C0; }
-.ps-rc-pill {
-  font-size: 9.5px; font-weight: 800; padding: 2px 7px;
-  border-radius: 6px; border: 1px solid;
-}
-.ps-rc-pill--ok   { background: #E8F5E9; color: #2E7D32; border-color: #A5D6A7; }
-.ps-rc-pill--sym  { background: #FFEBEE; color: #C62828; border-color: #FFCDD2; }
-.ps-rc-pill--ref  { background: #E3F2FD; color: #1565C0; border-color: #BBDEFB; }
-.ps-rc-pill--void { background: #ECEFF1; color: #546E7A; border-color: #CFD8DC; }
-.ps-rc-sync {
-  font-size: 9.5px; font-weight: 700; padding: 2px 7px;
-  border-radius: 6px; border: 1px solid;
-}
-.ps-rc-sync--unsynced { background: #FFF8E1; color: #E65100; border-color: #FFE082; }
-.ps-rc-sync--synced   { background: #E8F5E9; color: #2E7D32; border-color: #A5D6A7; }
-.ps-rc-sync--failed   { background: #FFEBEE; color: #C62828; border-color: #FFCDD2; }
-.ps-rc-err-hint { font-size: 9.5px; color: #E65100; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 160px; }
-.ps-rc-void-btn {
-  flex-shrink: 0; width: 32px; height: 32px;
-  background: #FAFAFA; border: 1px solid #ECEFF1; border-radius: 8px;
-  display: flex; align-items: center; justify-content: center; cursor: pointer;
-}
-.ps-rc-void-btn svg { width: 14px; height: 14px; }
-
-/* ── QUEUE LIST ── */
-.ps-queue-list { padding: 0 14px; display: flex; flex-direction: column; gap: 10px; margin-top: 4px; }
-.ps-queue-card {
-  background: #fff; border-radius: 16px;
-  border: 1.5px solid #E3EAF8;
-  overflow: hidden; display: flex;
-}
-.ps-queue-card--critical { border-color: #FFCDD2; }
-.ps-queue-card--high     { border-color: #FFE082; }
-.ps-queue-card--normal   { border-color: #BBDEFB; }
-.ps-qc-stripe { width: 5px; flex-shrink: 0; }
-.ps-qc-stripe--critical { background: #C62828; }
-.ps-qc-stripe--high     { background: #E65100; }
-.ps-qc-stripe--normal   { background: #1565C0; }
-.ps-qc-body { flex: 1; padding: 11px 12px; }
-.ps-qc-row1 { display: flex; align-items: center; gap: 7px; margin-bottom: 5px; }
-.ps-qc-row2 { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; flex-wrap: wrap; }
-.ps-qc-row3 { display: flex; align-items: center; gap: 10px; }
-.ps-qc-priority-pill {
-  font-size: 9.5px; font-weight: 800; padding: 3px 9px;
-  border-radius: 7px; border: 1px solid; text-transform: uppercase; letter-spacing: .5px;
-}
-.ps-qcp--critical { background: #FFEBEE; color: #C62828; border-color: #FFCDD2; }
-.ps-qcp--high     { background: #FFF3E0; color: #E65100; border-color: #FFCC80; }
-.ps-qcp--normal   { background: #E3F2FD; color: #1565C0; border-color: #BBDEFB; }
-.ps-qc-time   { font-size: 11px; color: #90A4AE; margin-left: auto; }
-.ps-qc-gender { font-size: 12px; font-weight: 700; color: #0D1B3E; }
-.ps-qc-temp   { font-size: 12px; font-weight: 700; color: #C62828; }
-.ps-qc-name   { font-size: 12px; color: #546E7A; }
-.ps-qc-meta   { font-size: 10.5px; color: #90A4AE; }
-.ps-qc-reason {
-  margin-top: 6px; font-size: 10.5px; color: #546E7A;
-  background: #F5F9FF; border-radius: 8px; padding: 6px 9px;
-  border: 1px solid #E3EAF8; line-height: 1.4;
-}
-.ps-qc-cancelled-note {
-  margin-top: 6px; font-size: 10px; color: #78909C;
-  display: flex; align-items: center; gap: 5px;
-}
-.ps-qc-cancelled-note svg { width: 12px; height: 12px; flex-shrink: 0; }
-.ps-qc-actions { padding: 11px 12px 11px 0; display: flex; align-items: center; }
-.ps-qc-cancel-btn {
-  font-size: 11px; font-weight: 700; color: #C62828;
-  background: #FFEBEE; border: 1.5px solid #FFCDD2; border-radius: 10px;
-  padding: 6px 12px; cursor: pointer; white-space: nowrap;
-}
-.ps-qc-cancel-btn:disabled { opacity: .5; cursor: not-allowed; }
-
-/* ── VOID / CANCEL MODALS ── */
-.ps-void-modal {
-  --width: 92%; --height: auto; --border-radius: 20px;
-  --box-shadow: 0 16px 48px rgba(0,0,0,0.2);
-}
-.ps-vm-content {
-  padding: 20px; background: #fff; border-radius: 20px;
-}
-.ps-vm-header {
-  display: flex; align-items: center; gap: 10px; margin-bottom: 12px;
-}
-.ps-vm-header svg { width: 18px; height: 18px; flex-shrink: 0; }
-.ps-vm-title { font-size: 15px; font-weight: 800; color: #0D1B3E; }
-.ps-vm-body  { font-size: 12.5px; color: #546E7A; line-height: 1.5; margin-bottom: 16px; }
-.ps-vm-body strong { font-weight: 700; color: #0D1B3E; }
-.ps-vm-body code   { background: #EEF2FF; padding: 1px 5px; border-radius: 4px; font-size: 11px; }
-.ps-vm-field { margin-bottom: 12px; }
-.ps-vm-label { font-size: 11px; font-weight: 700; color: #546E7A; letter-spacing: .5px; display: block; margin-bottom: 6px; }
-.ps-vm-textarea {
-  width: 100%; border: 1.5px solid #CFD8E8; border-radius: 12px;
-  padding: 10px 12px; font-size: 13.5px; color: #0D1B3E;
-  resize: none; outline: none; font-family: inherit;
-  background: #FAFAFA;
-}
-.ps-vm-textarea:focus { border-color: #1565C0; background: #fff; }
-.ps-vm-char-count { font-size: 10px; color: #B0BEC5; text-align: right; margin-top: 3px; }
-.ps-vm-error { font-size: 11.5px; font-weight: 600; color: #C62828; margin-bottom: 10px; }
-.ps-vm-actions { display: flex; gap: 10px; }
-.ps-vm-cancel {
-  flex: 1; height: 44px; border-radius: 12px;
-  background: #F5F5F5; border: 1.5px solid #E0E0E0;
-  font-size: 13px; font-weight: 700; color: #546E7A; cursor: pointer;
-}
-.ps-vm-confirm {
-  flex: 2; height: 44px; border-radius: 12px;
-  background: #C62828; border: none;
-  font-size: 13px; font-weight: 700; color: #fff; cursor: pointer;
-}
-.ps-vm-confirm--orange { background: #E65100; }
-.ps-vm-confirm:disabled { opacity: .4; cursor: not-allowed; }
-
-/* ── SPIN ANIMATION ── */
-.ps-spin { animation: ps-spin 0.8s linear infinite; }
-@keyframes ps-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-
-/* ── WHO SYMPTOM REFERENCE PANEL ── */
-.pf-syref {
-  margin-bottom: 10px;
-  border-radius: 12px;
-  background: #F0F6FF;
-  border: 1px solid #DDEAFF;
-  overflow: hidden;
-}
-.pf-syref-toggle {
-  width: 100%; display: flex; align-items: center; gap: 7px;
-  padding: 9px 12px; background: transparent; border: none;
-  cursor: pointer; text-align: left;
-  font-size: 11px; font-weight: 700; color: #1565C0;
-  -webkit-tap-highlight-color: transparent;
-}
-.pf-syref-toggle svg:first-child { width: 14px; height: 14px; flex-shrink: 0; }
-.pf-syref-toggle span { flex: 1; }
-.pf-syref-chevron {
-  width: 10px; height: 10px; flex-shrink: 0;
-  transition: transform .2s ease;
-}
-.pf-syref-chevron--open { transform: rotate(180deg); }
-.pf-syref-body {
-  display: flex; flex-wrap: wrap; gap: 5px;
-  padding: 0 10px 10px;
-}
-.pf-syref-chip {
-  font-size: 10.5px; font-weight: 600; color: #1565C0;
-  background: #fff; border: 1px solid #BBDEFB;
-  border-radius: 8px; padding: 3px 9px;
-  white-space: nowrap;
+.ps-who-chips { display:flex; flex-wrap:wrap; gap:4px; }
+.ps-who-chip {
+  font-size:10px; font-weight:500; color:#475569;
+  background:linear-gradient(135deg,#E0ECFF,#CCE0FF); border:1px solid rgba(0,112,224,.1);
+  padding:3px 9px; border-radius:5px;
 }
 
-/* ══════════════════════════════════════════════════════════════
-   PREMIUM CAPTURE FORM — pf-* namespace
-   Light material navy · animated · tactile
-══════════════════════════════════════════════════════════════ */
+/* ── Symptoms section ── */
+.ps-sym-section {
+  padding:10px 16px 10px;
+  border-bottom:1px solid rgba(0,0,0,.04);
+  background:linear-gradient(145deg,#FFFFFF,#F4F7FC); flex-shrink:0;
+}
+.ps-sym-label { display:flex; align-items:center; gap:8px; margin-bottom:8px; }
+.ps-req-badge {
+  font-size:9px; font-weight:700;
+  text-transform:uppercase; letter-spacing:.6px;
+  color:#E02050; background:linear-gradient(135deg,#FEF2F2,#FECACA); padding:3px 9px; border-radius:5px;
+  border:1px solid rgba(224,32,80,.1);
+}
+.ps-sym-row { display:flex; gap:8px; }
+.ps-sym-no, .ps-sym-yes {
+  flex:1; display:flex; flex-direction:column; align-items:center; gap:5px;
+  padding:14px 8px 12px; border-radius:14px; border:2px solid rgba(0,0,0,.06);
+  background:linear-gradient(145deg,#FFFFFF,#F4F7FC); cursor:pointer; min-height:100px;
+  transition:all .2s cubic-bezier(.16,1,.3,1); position:relative; overflow:hidden;
+  box-shadow:0 1px 3px rgba(0,0,0,.04),0 4px 20px rgba(0,30,80,.06);
+  -webkit-tap-highlight-color:transparent;
+}
+.ps-sym-no::before, .ps-sym-yes::before {
+  content:''; position:absolute; top:0; left:0; right:0; height:1px;
+  background:linear-gradient(90deg,transparent 20%,rgba(255,255,255,.8) 50%,transparent 80%);
+}
+.ps-sym-ic  { width:36px; height:36px; display:flex; align-items:center; justify-content:center; }
+.ps-sym-ic svg { width:32px; height:32px; }
+.ps-sym-main { font-size:14px; font-weight:700; color:#0B1A30; line-height:1.2; }
+.ps-sym-sub  { font-size:10px; color:#94A3B8; }
+.ps-sym-no:active, .ps-sym-yes:active { transform:scale(.97); }
+.ps-sym-no--active {
+  border-color:rgba(0,168,107,.3); background:linear-gradient(135deg,#ECFDF5,#D1FAE5);
+  box-shadow:0 4px 16px rgba(0,168,107,.2);
+}
+.ps-sym-no--active .ps-sym-main { color:#007A50; }
+.ps-sym-no--active .ps-sym-sub  { color:#00A86B; }
+.ps-sym-yes--active {
+  border-color:rgba(224,32,80,.3); background:linear-gradient(135deg,#FEF2F2,#FECACA);
+  box-shadow:0 4px 16px rgba(224,32,80,.2);
+}
+.ps-sym-yes--active .ps-sym-main { color:#B01840; }
+.ps-sym-yes--active .ps-sym-sub  { color:#E02050; }
 
-/* Section wrapper */
-.pf-section {
-  padding: 14px 14px 0;
+/* ── Name section — reveals only when symptomatic ── */
+.ps-name-section {
+  background:linear-gradient(145deg,#FFFFFF,#F4F7FC); border-bottom:1px solid rgba(0,0,0,.04);
+  padding:10px 16px 10px; flex-shrink:0;
 }
-.pf-section--last { padding-bottom: 0; }
-.pf-label {
-  font-size: 10px; font-weight: 800; letter-spacing: 1.2px;
-  text-transform: uppercase; color: #78909C;
-  margin-bottom: 8px; display: flex; align-items: center; gap: 7px;
+.ps-reveal-enter-active { animation:revealIn .25s cubic-bezier(.16,1,.3,1); }
+.ps-reveal-leave-active { transition:opacity .15s, transform .15s; }
+.ps-reveal-leave-to     { opacity:0; transform:translateY(-6px); }
+.ps-name-row { display:flex; flex-direction:column; gap:5px; }
+.ps-name-field {
+  display:flex; align-items:center; gap:8px;
+  background:linear-gradient(145deg,#E8EDF7,#F0F3FA); border:1.5px solid rgba(0,0,0,.08);
+  border-radius:10px; padding:0 14px;
+  transition:all .25s cubic-bezier(.16,1,.3,1);
 }
-.pf-opt { font-size: 9px; font-weight: 600; letter-spacing: .3px; text-transform: none; color: #B0BEC5; }
-.pf-req {
-  font-size: 9px; font-weight: 700; letter-spacing: .3px; text-transform: none;
-  color: #C62828; background: #FFEBEE; padding: 1px 6px; border-radius: 5px; border: 1px solid #FFCDD2;
+.ps-name-field--focus { border-color:rgba(0,112,224,.35); background:#fff; box-shadow:0 0 0 3px rgba(0,112,224,.08); }
+.ps-name-field--err   { border-color:rgba(224,32,80,.35); background:linear-gradient(135deg,#FEF2F2,#FECACA); }
+.ps-name-input {
+  flex:1; background:transparent; border:none; outline:none;
+  font-size:16px; color:#0B1A30; padding:12px 0;
+  min-height:48px;
 }
-.pf-err {
-  margin: 5px 0 0; font-size: 11px; font-weight: 600; color: #C62828;
-  display: flex; align-items: center; gap: 5px;
+.ps-name-input::placeholder { color:#94A3B8; font-size:14px; }
+.ps-name-clear { background:none; border:none; color:#94A3B8; cursor:pointer; font-size:14px; padding:4px; min-width:36px; min-height:36px; display:flex; align-items:center; justify-content:center; }
+.ps-req { color:#E02050; }
+
+/* Priority strip */
+.ps-priority-strip {
+  display:flex; align-items:center; gap:8px; margin-top:8px;
+  padding:8px 12px; border-radius:10px; border:1.5px solid;
+}
+.ps-priority-strip--normal   { background:linear-gradient(135deg,#E0ECFF,#CCE0FF); border-color:rgba(0,112,224,.15); }
+.ps-priority-strip--high     { background:linear-gradient(135deg,#FFFBEB,#FEF3C7); border-color:rgba(204,136,0,.15); }
+.ps-priority-strip--critical { background:linear-gradient(135deg,#FEF2F2,#FECACA); border-color:rgba(224,32,80,.15); }
+.ps-pd { width:7px; height:7px; border-radius:50%; flex-shrink:0; }
+.ps-pd--normal   { background:#0070E0; box-shadow:0 0 8px rgba(0,112,224,.4); }
+.ps-pd--high     { background:#CC8800; box-shadow:0 0 8px rgba(204,136,0,.4); }
+.ps-pd--critical { background:#E02050; box-shadow:0 0 8px rgba(224,32,80,.4); animation:dotPulse 1.5s ease-in-out infinite; }
+.ps-pl { font-size:10px; font-weight:700; letter-spacing:.6px; }
+.ps-priority-strip--normal   .ps-pl { color:#0070E0; }
+.ps-priority-strip--high     .ps-pl { color:#CC8800; }
+.ps-priority-strip--critical .ps-pl { color:#E02050; }
+.ps-pr { font-size:10px; color:#475569; margin-left:auto; text-align:right; }
+
+/* ── Capture button + footer ── */
+.ps-capture-footer {
+  padding:12px 16px;
+  background:linear-gradient(180deg,#F4F7FC 0%,#FFFFFF 100%);
+  border-top:1px solid rgba(0,0,0,.06);
+  box-shadow:0 -2px 12px rgba(0,30,80,.04);
+  flex-shrink:0;
+  margin-top:auto;
+}
+.ps-cap-btn {
+  width:100%; border-radius:12px; border:none; cursor:pointer;
+  transition:all .2s cubic-bezier(.16,1,.3,1); min-height:52px;
+  position:relative; overflow:hidden;
+  -webkit-tap-highlight-color:transparent;
+}
+.ps-cap-btn::before {
+  content:''; position:absolute; top:0; left:0; right:0; height:1px;
+  background:linear-gradient(90deg,transparent 20%,rgba(255,255,255,.25) 50%,transparent 80%);
+}
+.ps-cap-btn-inner { display:flex; align-items:center; justify-content:center; gap:8px; padding:14px 20px; }
+.ps-cap-btn-inner svg { width:20px; height:20px; }
+.ps-cap-btn-inner span { font-size:14px; font-weight:600; letter-spacing:.5px; }
+.ps-cap-btn--clear    {
+  background:linear-gradient(135deg,#007A50,#00A86B);
+  box-shadow:0 4px 16px rgba(0,168,107,.25);
+}
+.ps-cap-btn--clear .ps-cap-btn-inner { color:#fff; }
+.ps-cap-btn--clear:active { transform:scale(.98); }
+.ps-cap-btn--referral {
+  background:linear-gradient(135deg,#B01840,#E02050);
+  box-shadow:0 4px 16px rgba(224,32,80,.25);
+}
+.ps-cap-btn--referral .ps-cap-btn-inner { color:#fff; }
+.ps-cap-btn--referral:active { transform:scale(.98); }
+.ps-cap-btn--disabled {
+  background:linear-gradient(145deg,#F8FAFC,#F1F5F9); box-shadow:none; cursor:not-allowed;
+  border:1px solid rgba(0,0,0,.06);
+}
+.ps-cap-btn--disabled .ps-cap-btn-inner { color:#94A3B8; }
+.ps-cap-hint { font-size:11px; font-weight:500; color:#94A3B8; text-align:center; margin-top:6px; }
+
+/* ── Result panel ── */
+.ps-result-enter-active { animation:resultIn .35s cubic-bezier(.16,1,.3,1); }
+.ps-result-leave-active { transition:opacity .15s; }
+.ps-result-leave-to     { opacity:0; }
+.ps-result {
+  margin:8px 12px 10px; border-radius:12px; padding:12px; border:1.5px solid;
+  animation:resultIn .35s cubic-bezier(.16,1,.3,1);
+  box-shadow:0 1px 3px rgba(0,0,0,.04),0 4px 20px rgba(0,30,80,.06);
+  position:relative; overflow:hidden;
+  max-width:100%; box-sizing:border-box;
+}
+.ps-result::before {
+  content:''; position:absolute; top:0; left:0; right:0; height:1px;
+  background:linear-gradient(90deg,transparent 20%,rgba(255,255,255,.8) 50%,transparent 80%);
+}
+.ps-result--ok  { background:linear-gradient(135deg,#ECFDF5,#D1FAE5); border-color:rgba(0,168,107,.12); }
+.ps-result--ref { background:linear-gradient(135deg,#FEF2F2,#FECACA); border-color:rgba(224,32,80,.12); }
+.ps-result-hdr  { display:flex; align-items:center; gap:8px; margin-bottom:6px; }
+.ps-result-icon { font-size:18px; width:32px; height:32px; border-radius:8px; background:rgba(0,0,0,.05); display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+.ps-result-title { flex:1; font-size:12px; font-weight:700; color:#0B1A30; min-width:0; }
+.ps-result-count { display:flex; flex-direction:column; align-items:center; flex-shrink:0; }
+.ps-result-n { font-size:18px; font-weight:800; color:#0B1A30; line-height:1; }
+.ps-result-l { font-size:7px; font-weight:700; color:#94A3B8; text-transform:uppercase; letter-spacing:.8px; }
+.ps-result-chips { display:flex; flex-wrap:wrap; gap:4px; margin-bottom:8px; overflow:hidden; }
+.ps-rc { font-size:9px; font-weight:600; color:#475569; background:linear-gradient(135deg,#F8FAFC,#F1F5F9); padding:2px 7px; border-radius:4px; border:1px solid rgba(0,0,0,.06); max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.ps-rc--temp     { color:#CC8800; background:linear-gradient(135deg,#FFFBEB,#FEF3C7); border-color:rgba(204,136,0,.12); }
+.ps-rc--critical { color:#E02050; background:linear-gradient(135deg,#FEF2F2,#FECACA); border-color:rgba(224,32,80,.1); }
+.ps-rc--high     { color:#CC8800; background:linear-gradient(135deg,#FFFBEB,#FEF3C7); border-color:rgba(204,136,0,.12); }
+.ps-rc--normal   { color:#00A86B; background:linear-gradient(135deg,#ECFDF5,#D1FAE5); border-color:rgba(0,168,107,.12); }
+.ps-rc--synced   { color:#00A86B; background:linear-gradient(135deg,#ECFDF5,#D1FAE5); border-color:rgba(0,168,107,.12); }
+.ps-rc--pending  { color:#CC8800; background:linear-gradient(135deg,#FFFBEB,#FEF3C7); border-color:rgba(204,136,0,.12); }
+.ps-rc--sync     { font-size:9px; font-weight:500; }
+.ps-result-actions { display:flex; gap:6px; }
+.ps-result-void {
+  flex:1; padding:9px 8px; border-radius:8px;
+  background:linear-gradient(145deg,#FFFFFF,#F4F7FC);
+  border:1.5px solid rgba(0,0,0,.08); color:#475569;
+  font-size:11px; font-weight:600; cursor:pointer; min-height:40px;
+  text-align:center;
+  -webkit-tap-highlight-color:transparent;
+}
+.ps-result-next {
+  flex:2; padding:9px 8px; border-radius:8px;
+  background:linear-gradient(135deg,#0055CC,#0070E0,#3399FF);
+  border:none; color:#fff;
+  font-size:11px; font-weight:600; cursor:pointer; min-height:40px;
+  box-shadow:0 4px 16px rgba(0,112,224,.25);
+  text-align:center;
+  -webkit-tap-highlight-color:transparent;
 }
 
-/* ── GENDER CARDS ── */
-.pf-gender-row {
-  display: grid; grid-template-columns: 1fr 1fr; gap: 10px;
+/* ═══════════════════════════════════════════════════════════════
+   RECORDS TAB
+═══════════════════════════════════════════════════════════════ */
+.ps-records-tab { display:flex; flex-direction:column; height:100%; }
+.ps-tab-bar {
+  display:flex; align-items:center; gap:7px; padding:9px 14px;
+  background:#fff; border-bottom:1px solid rgba(0,0,0,.06); flex-shrink:0;
 }
-.pf-gender-card {
-  position: relative; overflow: hidden;
-  height: 82px; border-radius: 20px;
-  background: #F4F7FF;
-  border: 2px solid #E3EAF8;
-  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
-  cursor: pointer;
-  transition: transform .12s cubic-bezier(.34,1.56,.64,1), border-color .15s, background .15s, box-shadow .15s;
-  -webkit-tap-highlight-color: transparent;
-}
-.pf-gender-card:active { transform: scale(.95); }
-
-/* Selection ring pulse animation */
-.pf-gc-ring {
-  position: absolute; inset: -2px; border-radius: 22px;
-  border: 2.5px solid transparent; pointer-events: none;
-  transition: border-color .2s, box-shadow .2s;
-}
-
-/* Male inactive */
-.pf-gender-card--male { }
-.pf-gender-card--male .pf-gc-icon :deep(svg) { stroke: #1565C0; }
-
-/* Female inactive */
-.pf-gender-card--female .pf-gc-icon :deep(svg) { stroke: #7B1FA2; }
-
-/* Active state — male */
-.pf-gender-card--male.pf-gender-card--active {
-  background: linear-gradient(145deg, #1D4ED8 0%, #1565C0 60%, #0D47A1 100%);
-  border-color: #0D47A1;
-  box-shadow: 0 6px 20px rgba(13,71,161,.35), 0 2px 8px rgba(13,71,161,.2);
-  transform: translateY(-2px) scale(1.01);
-}
-.pf-gender-card--male.pf-gender-card--active .pf-gc-ring {
-  border-color: rgba(96,165,250,.5);
-  box-shadow: 0 0 0 4px rgba(13,71,161,.12);
-}
-.pf-gender-card--male.pf-gender-card--active .pf-gc-icon :deep(svg) { stroke: #fff; }
-.pf-gender-card--male.pf-gender-card--active .pf-gc-lbl { color: #fff; }
-
-/* Active state — female */
-.pf-gender-card--female.pf-gender-card--active {
-  background: linear-gradient(145deg, #7B1FA2 0%, #8E24AA 60%, #6A1B9A 100%);
-  border-color: #6A1B9A;
-  box-shadow: 0 6px 20px rgba(123,31,162,.32), 0 2px 8px rgba(123,31,162,.18);
-  transform: translateY(-2px) scale(1.01);
-}
-.pf-gender-card--female.pf-gender-card--active .pf-gc-ring {
-  border-color: rgba(206,147,216,.5);
-  box-shadow: 0 0 0 4px rgba(123,31,162,.1);
-}
-.pf-gender-card--female.pf-gender-card--active .pf-gc-icon :deep(svg) { stroke: #fff; }
-.pf-gender-card--female.pf-gender-card--active .pf-gc-lbl { color: #fff; }
-
-.pf-gc-icon {
-  width: 32px; height: 32px;
-  display: flex; align-items: center; justify-content: center;
-}
-.pf-gc-icon :deep(svg) { width: 22px; height: 22px; transition: stroke .15s; }
-.pf-gc-lbl {
-  font-size: 13px; font-weight: 800; letter-spacing: .3px;
-  color: #546E7A; transition: color .15s;
-}
-.pf-gc-tick {
-  position: absolute; top: 7px; right: 9px;
-  width: 18px; height: 18px; border-radius: 50%;
-  background: rgba(255,255,255,.25);
-  display: flex; align-items: center; justify-content: center;
-  color: #fff;
-  animation: pf-tick-pop .2s cubic-bezier(.34,1.56,.64,1) both;
-}
-.pf-gc-tick svg { width: 11px; height: 11px; }
-@keyframes pf-tick-pop { from { transform: scale(0); opacity: 0; } to { transform: scale(1); opacity: 1; } }
-
-/* ── TEMPERATURE CARD ── */
-.pf-temp-card {
-  display: flex; align-items: center; gap: 10px;
-  background: #fff; border: 2px solid #E3EAF8; border-radius: 18px;
-  padding: 0 10px 0 14px; min-height: 58px;
-  transition: border-color .2s, box-shadow .2s;
-}
-.pf-temp-card--focus {
-  border-color: #1565C0;
-  box-shadow: 0 0 0 4px rgba(21,101,192,.08), 0 4px 16px rgba(21,101,192,.1);
-}
-.pf-temp-card--warn {
-  border-color: #E65100;
-  box-shadow: 0 0 0 4px rgba(230,81,0,.07);
-}
-.pf-temp-card--crit {
-  border-color: #C62828;
-  box-shadow: 0 0 0 4px rgba(198,40,40,.08);
-  animation: pf-crit-pulse 1.5s ease-in-out infinite;
-}
-@keyframes pf-crit-pulse {
-  0%,100%{ box-shadow: 0 0 0 4px rgba(198,40,40,.08); }
-  50%{ box-shadow: 0 0 0 6px rgba(198,40,40,.18), 0 4px 20px rgba(198,40,40,.15); }
-}
-.pf-temp-icon { flex-shrink: 0; width: 20px; height: 20px; display: flex; align-items: center; justify-content: center; }
-.pf-temp-icon svg { width: 18px; height: 18px; }
-.pf-temp-body { flex: 1; display: flex; flex-direction: column; justify-content: center; }
-.pf-temp-input-el {
-  border: none; outline: none; background: transparent;
-  font-size: 28px; font-weight: 800; color: #0D1B3E;
-  width: 100%; padding: 0; line-height: 1;
-}
-.pf-temp-input-el::placeholder { color: #CFD8DC; font-size: 20px; font-weight: 400; }
-.pf-temp-input-el::-webkit-outer-spin-button,
-.pf-temp-input-el::-webkit-inner-spin-button { -webkit-appearance: none; }
-.pf-temp-input-el { -moz-appearance: textfield; }
-.pf-temp-hint {
-  font-size: 10.5px; font-weight: 600; margin-top: 1px; line-height: 1.2;
-  animation: pf-hint-in .15s ease-out;
-}
-@keyframes pf-hint-in { from { opacity: 0; transform: translateY(-3px); } to { opacity: 1; } }
-.pf-temp-hint--normal { color: #2E7D32; }
-.pf-temp-hint--warn   { color: #E65100; }
-.pf-temp-hint--danger { color: #C62828; font-weight: 700; }
-.pf-unit-pill {
-  display: flex; flex-direction: column; gap: 3px; flex-shrink: 0;
-}
-.pf-unit-btn {
-  width: 40px; height: 22px; border-radius: 7px; border: none;
-  font-size: 11px; font-weight: 800; cursor: pointer;
-  transition: background .15s, color .15s;
-}
-.pf-unit-btn--on  { background: #1565C0; color: #fff; }
-.pf-unit-btn:not(.pf-unit-btn--on) { background: #EEF2FF; color: #90A4AE; }
-.pf-temp-x {
-  width: 32px; height: 32px; border-radius: 50%; background: #ECEFF1; border: none;
-  display: flex; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0;
-}
-.pf-temp-x svg { width: 12px; height: 12px; }
-
-/* Animated fever gauge */
-.pf-gauge-wrap { padding: 6px 2px 0; }
-.pf-gauge-track {
-  height: 5px; border-radius: 3px; position: relative;
-  background: linear-gradient(90deg,
-    #90CAF9 0%, #42A5F5 25%, #43A047 45%,
-    #FFA726 65%, #EF5350 80%, #B71C1C 100%);
-}
-.pf-gauge-fill {
-  position: absolute; top: 0; left: 0; bottom: 0; border-radius: 3px;
-  background: transparent; pointer-events: none;
-}
-.pf-gauge-thumb {
-  position: absolute; top: 50%; transform: translate(-50%,-50%);
-  width: 13px; height: 13px; border-radius: 50%; border: 2.5px solid #fff;
-  box-shadow: 0 1px 6px rgba(0,0,0,.25);
-  transition: left .3s cubic-bezier(.34,1.56,.64,1);
-}
-.pf-gauge-thumb--normal { background: #1565C0; }
-.pf-gauge-thumb--warn   { background: #E65100; }
-.pf-gauge-thumb--danger { background: #C62828; animation: pf-thumb-pulse .8s ease-in-out infinite; }
-@keyframes pf-thumb-pulse { 0%,100%{ box-shadow:0 1px 6px rgba(0,0,0,.25); } 50%{ box-shadow:0 0 0 5px rgba(198,40,40,.2),0 1px 6px rgba(0,0,0,.25); } }
-
-/* ── SYMPTOMS CARDS ── */
-.pf-sym-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-.pf-sym-card {
-  position: relative; overflow: hidden;
-  height: 88px; border-radius: 20px;
-  background: #F4F7FF; border: 2px solid #E3EAF8;
-  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
-  cursor: pointer;
-  transition: transform .12s cubic-bezier(.34,1.56,.64,1), border-color .15s, background .15s, box-shadow .15s;
-  -webkit-tap-highlight-color: transparent;
-}
-.pf-sym-card:active { transform: scale(.95); }
-.pf-sc-ring {
-  position: absolute; inset: -2px; border-radius: 22px;
-  border: 2.5px solid transparent; pointer-events: none;
-  transition: border-color .2s;
-}
-.pf-sc-icon { width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; }
-.pf-sc-icon svg { width: 26px; height: 26px; transition: stroke .15s; }
-.pf-sc-lbl {
-  font-size: 14px; font-weight: 800; letter-spacing: -.1px; color: #546E7A;
-  transition: color .15s;
-}
-.pf-sc-sub { font-size: 10px; font-weight: 600; color: #90A4AE; letter-spacing: .2px; transition: color .15s; }
-
-/* NO — active */
-.pf-sym-card--no.pf-sym-card--active {
-  background: linear-gradient(145deg, #1B5E20 0%, #2E7D32 50%, #388E3C 100%);
-  border-color: #1B5E20;
-  box-shadow: 0 6px 20px rgba(46,125,50,.35), 0 2px 8px rgba(46,125,50,.2);
-  transform: translateY(-2px) scale(1.01);
-}
-.pf-sym-card--no.pf-sym-card--active .pf-sc-ring { border-color: rgba(129,199,132,.5); }
-.pf-sym-card--no.pf-sym-card--active .pf-sc-lbl,
-.pf-sym-card--no.pf-sym-card--active .pf-sc-sub { color: #fff; }
-
-/* YES — active */
-.pf-sym-card--yes.pf-sym-card--active {
-  background: linear-gradient(145deg, #B71C1C 0%, #C62828 50%, #D32F2F 100%);
-  border-color: #B71C1C;
-  box-shadow: 0 6px 20px rgba(198,40,40,.35), 0 2px 8px rgba(198,40,40,.2);
-  transform: translateY(-2px) scale(1.01);
-  animation: pf-sym-alert .6s cubic-bezier(.34,1.56,.64,1);
-}
-@keyframes pf-sym-alert {
-  0%  { transform: translateY(-2px) scale(1.01); }
-  30% { transform: translateY(-2px) scale(1.04) rotate(-.5deg); }
-  60% { transform: translateY(-2px) scale(1.02) rotate(.3deg); }
-  100%{ transform: translateY(-2px) scale(1.01); }
-}
-.pf-sym-card--yes.pf-sym-card--active .pf-sc-ring { border-color: rgba(239,154,154,.5); }
-.pf-sym-card--yes.pf-sym-card--active .pf-sc-lbl,
-.pf-sym-card--yes.pf-sym-card--active .pf-sc-sub { color: #fff; }
-
-/* Traveler name slide-in */
-.pf-slide-enter-active { transition: all .22s cubic-bezier(.34,1.4,.64,1); }
-.pf-slide-leave-active { transition: all .15s ease-in; }
-.pf-slide-enter-from  { opacity: 0; transform: translateY(-8px) scaleY(.9); }
-.pf-slide-leave-to    { opacity: 0; transform: translateY(-4px) scaleY(.95); }
-.pf-name-wrap { margin-top: 10px; }
-.pf-name-card {
-  display: flex; align-items: center; gap: 10px;
-  background: #FFF8E1; border: 2px solid #FFE082; border-radius: 16px;
-  padding: 0 14px; height: 52px;
-  transition: border-color .2s, box-shadow .2s;
-}
-.pf-name-card--focus { border-color: #E65100; box-shadow: 0 0 0 4px rgba(230,81,0,.07); }
-.pf-name-card svg { width: 18px; height: 18px; flex-shrink: 0; }
-.pf-name-input {
-  flex: 1; border: none; outline: none; background: transparent;
-  font-size: 14.5px; color: #0D1B3E; font-weight: 500;
-}
-.pf-name-input::placeholder { color: #BCAAA4; }
-
-/* ── TEMP INLINE BADGE (kept for backward compat, now unused) ── */
-.ps-temp-badge { font-size: 9px; font-weight: 900; padding: 2px 6px; border-radius: 5px; }
-.ps-temp-badge--crit { background: #FFEBEE; color: #C62828; }
-.ps-temp-badge--high { background: #FFF3E0; color: #E65100; }
-.ps-field-error--compact { margin: 3px 14px 0; font-size: 11px; font-weight: 600; color: #C62828; }
-.ps-name-appear { margin: 8px 14px 0; }
-
-/* ── FILTER CHIPS ROW ── */
-.ps-filter-chips {
-  display: flex; align-items: center; gap: 6px;
-  padding: 0 14px 8px; flex-wrap: wrap;
-}
-.ps-chip {
-  height: 28px; padding: 0 11px; border-radius: 14px;
-  background: #ECEFF1; border: 1.5px solid #CFD8DC;
-  font-size: 11px; font-weight: 700; color: #546E7A;
-  cursor: pointer; white-space: nowrap; transition: all .1s;
-}
-.ps-chip:active { transform: scale(.96); }
-.ps-chip--active { background: #1565C0; border-color: #0D47A1; color: #fff; }
-.ps-chip--sm { height: 24px; padding: 0 9px; font-size: 10px; }
-.ps-chip--sym.ps-chip--active  { background: #C62828; border-color: #B71C1C; }
-.ps-chip--ok.ps-chip--active   { background: #2E7D32; border-color: #1B5E20; }
-.ps-chip--warn.ps-chip--active { background: #E65100; border-color: #BF360C; }
-
-/* ── FILTER BUTTON ── */
 .ps-filter-btn {
-  display: flex; align-items: center; gap: 5px;
-  height: 32px; padding: 0 10px; border-radius: 10px;
-  background: #E3F2FD; border: 1.5px solid #BBDEFB;
-  font-size: 12px; font-weight: 700; color: #1565C0; cursor: pointer;
+  display:flex; align-items:center; gap:5px; padding:6px 10px;
+  border-radius:7px; background:#EFF6FF; border:1.5px solid rgba(59,130,246,.2);
+  color:#1D4ED8; font-size:11px; font-weight:700; cursor:pointer;
 }
-.ps-filter-btn svg { width: 13px; height: 13px; }
-.ps-filter-btn-txt { max-width: 90px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ps-records-count { font-size: 11px; color: #90A4AE; margin-left: auto; }
+.ps-filter-btn svg { width:11px; height:11px; stroke:currentColor; }
+.ps-total-lbl { flex:1; font-size:11px; font-weight:500; color:#94A3B8; }
+.ps-icon-btn  { width:32px; height:32px; border-radius:7px; background:#F1F5F9; border:1.5px solid rgba(0,0,0,.08); display:flex; align-items:center; justify-content:center; cursor:pointer; }
+.ps-icon-btn svg { width:13px; height:13px; stroke:#64748B; }
+.ps-icon-btn:disabled { opacity:.5; cursor:not-allowed; }
 
-/* ── QUEUE FILTER ── */
-.ps-queue-filter { display: flex; gap: 5px; margin-left: auto; }
+.ps-filter-row { display:flex; gap:5px; overflow-x:auto; scrollbar-width:none; padding:7px 14px; background:#fff; border-bottom:1px solid rgba(0,0,0,.05); flex-shrink:0; }
+.ps-filter-row::-webkit-scrollbar { display:none; }
+.ps-fc { padding:5px 11px; border-radius:14px; font-size:10px; font-weight:700; border:1.5px solid rgba(0,0,0,.08); background:#F8FAFC; color:#64748B; cursor:pointer; white-space:nowrap; transition:all .12s; min-height:30px; }
+.ps-fc--on     { background:#0F172A; border-color:#0F172A; color:#fff; }
+.ps-fc--sym.ps-fc--on  { background:#DC2626; border-color:#DC2626; color:#fff; }
+.ps-fc--ok.ps-fc--on   { background:#16A34A; border-color:#16A34A; color:#fff; }
+.ps-fc--pending.ps-fc--on { background:#D97706; border-color:#D97706; color:#fff; }
+.ps-fc--dir.ps-fc--on  { background:#7C3AED; border-color:#7C3AED; color:#fff; }
 
-/* ── PAGINATION ── */
-.ps-pagination {
-  display: flex; align-items: center; justify-content: center;
-  gap: 16px; padding: 12px 14px;
-  border-top: 1px solid #E3EAF8; margin-top: 4px;
-}
-.ps-page-btn {
-  height: 34px; padding: 0 14px; border-radius: 10px;
-  background: #E3F2FD; border: 1.5px solid #BBDEFB;
-  font-size: 12px; font-weight: 700; color: #1565C0; cursor: pointer;
-}
-.ps-page-btn:disabled { opacity: .4; cursor: not-allowed; }
-.ps-page-info { font-size: 12px; font-weight: 700; color: #546E7A; }
+.ps-loading { display:flex; justify-content:center; padding:40px; }
+.ps-dots { display:flex; gap:5px; }
+.ps-dots div { width:7px; height:7px; border-radius:50%; background:#94A3B8; animation:dotPulse 1.2s infinite; }
+.ps-dots div:nth-child(2) { animation-delay:.2s; }
+.ps-dots div:nth-child(3) { animation-delay:.4s; }
+.ps-empty { display:flex; flex-direction:column; align-items:center; gap:8px; padding:50px 24px; color:#94A3B8; }
+.ps-empty svg { opacity:.4; }
+.ps-empty p { font-size:13px; font-weight:500; }
 
-/* ── FILTER PRESETS ── */
-.ps-filter-presets {
-  display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 4px;
+.ps-rec-list { display:flex; flex-direction:column; gap:1px; background:rgba(0,0,0,.04); overflow-y:auto; }
+.ps-rec-card {
+  display:flex; align-items:stretch; background:#fff; cursor:pointer;
+  transition:background .1s;
 }
-.ps-preset-btn {
-  height: 30px; padding: 0 12px; border-radius: 10px;
-  background: #ECEFF1; border: 1.5px solid #CFD8DC;
-  font-size: 11px; font-weight: 700; color: #546E7A;
-  cursor: pointer;
-}
-.ps-preset-btn--active { background: #1565C0; border-color: #0D47A1; color: #fff; }
+.ps-rec-card:hover { background:#F8FAFC; }
+.ps-rec-card--void { opacity:.6; }
+.ps-rec-bar { width:3px; flex-shrink:0; }
+.ps-rec-bar--sym { background:#DC2626; }
+.ps-rec-bar--ok  { background:#16A34A; }
+.ps-rec-body { flex:1; padding:10px 12px; min-width:0; }
+.ps-rec-top  { display:flex; align-items:baseline; justify-content:space-between; margin-bottom:3px; }
+.ps-rec-name { font-size:13px; font-weight:700; color:#0F172A; }
+.ps-rec-time { font-size:10px; color:#94A3B8; font-variant-numeric:tabular-nums; }
+.ps-rec-mid  { display:flex; align-items:center; gap:5px; font-size:11px; color:#64748B; margin-bottom:5px; }
+.ps-rec-dot  { color:#CBD5E1; }
+.ps-rec-bot  { display:flex; align-items:center; gap:5px; flex-wrap:wrap; }
+.ps-rbadge   { font-size:9px; font-weight:700; padding:2px 7px; border-radius:4px; border:1px solid; }
+.ps-rbadge--sym  { background:#FFF1F2; color:#991B1B; border-color:rgba(153,27,27,.2); }
+.ps-rbadge--ok   { background:#F0FDF4; color:#166534; border-color:rgba(22,101,52,.2); }
+.ps-rbadge--void { background:#F1F5F9; color:#64748B; border-color:rgba(0,0,0,.1); }
+.ps-rsync { font-size:9px; font-weight:700; padding:2px 7px; border-radius:4px; }
+.ps-rsync--synced  { background:#F0FDF4; color:#166534; }
+.ps-rsync--pending { background:#FFFBEB; color:#92400E; }
+.ps-rsync--failed  { background:#FFF1F2; color:#991B1B; }
+.ps-rec-arrow { display:flex; align-items:center; padding:0 12px; color:#CBD5E1; font-size:18px; font-weight:200; }
 
-/* ── DATE INPUT ── */
+.ps-pages { display:flex; align-items:center; justify-content:center; gap:10px; padding:12px; background:#fff; border-top:1px solid rgba(0,0,0,.05); }
+.ps-pg-btn { padding:7px 14px; border-radius:7px; background:#F1F5F9; border:1.5px solid rgba(0,0,0,.08); color:#0F172A; font-size:11px; font-weight:700; cursor:pointer; min-height:34px; }
+.ps-pg-btn:disabled { opacity:.4; cursor:not-allowed; }
+.ps-pg-info { font-size:11px; font-weight:500; color:#64748B; font-variant-numeric:tabular-nums; }
+
+/* ═══════════════════════════════════════════════════════════════
+   QUEUE TAB
+═══════════════════════════════════════════════════════════════ */
+.ps-queue-tab { display:flex; flex-direction:column; height:100%; }
+.ps-q-list    { display:flex; flex-direction:column; gap:1px; background:rgba(0,0,0,.04); overflow-y:auto; }
+.ps-q-card    { background:#fff; cursor:pointer; transition:background .1s; }
+.ps-q-card:hover { background:#F8FAFC; }
+.ps-q-card--closed { opacity:.6; }
+.ps-q-top-bar { height:3px; }
+.ps-qtb--critical { background:linear-gradient(90deg,#B91C1C,#DC2626); }
+.ps-qtb--high     { background:linear-gradient(90deg,#D97706,#F59E0B); }
+.ps-qtb--normal   { background:linear-gradient(90deg,#15803D,#16A34A); }
+.ps-q-body { padding:10px 14px; }
+.ps-q-row1 { display:flex; align-items:center; gap:7px; margin-bottom:4px; }
+.ps-q-pri  { font-size:9px; font-weight:800; padding:2px 8px; border-radius:4px; border:1px solid; letter-spacing:.3px; }
+.ps-q-pri--critical { background:#FFF1F2; color:#991B1B; border-color:rgba(153,27,27,.2); }
+.ps-q-pri--high     { background:#FFFBEB; color:#92400E; border-color:rgba(146,64,14,.2); }
+.ps-q-pri--normal   { background:#F0FDF4; color:#166534; border-color:rgba(22,101,52,.2); }
+.ps-q-sts  { font-size:9px; font-weight:700; padding:2px 7px; border-radius:4px; background:#F1F5F9; color:#64748B; }
+.ps-q-time { margin-left:auto; font-size:10px; color:#94A3B8; font-variant-numeric:tabular-nums; }
+.ps-q-name { font-size:14px; font-weight:700; color:#0F172A; margin-bottom:5px; }
+.ps-q-chips { display:flex; gap:4px; flex-wrap:wrap; }
+.ps-qc { font-size:10px; font-weight:600; color:#64748B; background:#F1F5F9; padding:2px 8px; border-radius:10px; }
+.ps-qc--temp { color:#92400E; background:#FFFBEB; }
+
+/* ═══════════════════════════════════════════════════════════════
+   MODALS
+═══════════════════════════════════════════════════════════════ */
+/* Void */
+.ps-void-wrap { padding:16px; display:flex; flex-direction:column; gap:12px; }
+.ps-void-warn {
+  display:flex; align-items:flex-start; gap:10px; padding:12px;
+  background:#FFFBEB; border:1px solid rgba(217,119,6,.25); border-radius:9px;
+  font-size:11px; color:#78350F; line-height:1.5;
+}
+.ps-void-warn svg { width:16px; height:16px; flex-shrink:0; margin-top:2px; }
+.ps-void-lbl { font-size:10px; font-weight:700; color:#64748B; text-transform:uppercase; letter-spacing:.5px; }
+.ps-void-ta {
+  width:100%; background:#F8FAFC; border:1.5px solid rgba(0,0,0,.1); border-radius:8px;
+  color:#0F172A; font-size:16px; padding:10px 12px; outline:none; font-family:inherit;
+  resize:none; transition:border-color .15s;
+}
+.ps-void-ta:focus { border-color:#3B82F6; background:#EFF6FF; }
+.ps-void-meta { font-size:10px; color:#94A3B8; text-align:right; }
+.ps-void-meta--err { color:#DC2626; }
+.ps-void-submit {
+  width:100%; padding:13px; border-radius:9px; border:none;
+  background:linear-gradient(135deg,#B91C1C,#DC2626); color:#fff;
+  font-size:14px; font-weight:800; cursor:pointer; min-height:48px; font-family:inherit;
+}
+.ps-void-submit:disabled { opacity:.45; cursor:not-allowed; }
+
+/* Detail */
+.ps-det-wrap { display:flex; flex-direction:column; }
+.ps-det-status {
+  padding:13px 16px; font-size:12px; font-weight:800; display:flex; align-items:center; justify-content:space-between;
+}
+.ps-det-status--ok       { background:#F0FDF4; color:#166534; border-bottom:1px solid rgba(22,163,74,.15); }
+.ps-det-status--sym      { background:#FFF1F2; color:#991B1B; border-bottom:1px solid rgba(220,38,38,.15); }
+.ps-det-status--critical { background:#FFF1F2; color:#991B1B; border-bottom:1px solid rgba(220,38,38,.15); }
+.ps-det-status--high     { background:#FFFBEB; color:#92400E; border-bottom:1px solid rgba(245,158,11,.2); }
+.ps-det-status--normal   { background:#F0FDF4; color:#166534; border-bottom:1px solid rgba(22,163,74,.15); }
+.ps-det-voided { font-size:9px; background:rgba(0,0,0,.1); color:#64748B; padding:2px 7px; border-radius:4px; }
+.ps-det-grid { display:flex; flex-direction:column; }
+.ps-dg-row { display:flex; align-items:baseline; justify-content:space-between; gap:12px; padding:10px 16px; border-bottom:1px solid rgba(0,0,0,.05); }
+.ps-dk { font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.5px; color:#94A3B8; min-width:90px; flex-shrink:0; }
+.ps-dv { font-size:12px; font-weight:600; color:#0F172A; text-align:right; flex:1; }
+.ps-dv--red   { color:#DC2626; }
+.ps-dv--green { color:#16A34A; }
+.ps-dv--mono  { font-variant-numeric:tabular-nums; font-size:11px; word-break:break-all; }
+.ps-det-void-btn {
+  width:100%; padding:12px; border-radius:9px;
+  background:#FFF1F2; border:1.5px solid rgba(220,38,38,.2);
+  color:#DC2626; font-size:12px; font-weight:700; cursor:pointer; min-height:44px;
+}
+
+/* Date filter */
+.ps-date-opt {
+  width:100%; padding:13px 14px; border-radius:9px; text-align:left;
+  background:#F8FAFC; border:1.5px solid rgba(0,0,0,.08);
+  font-size:14px; font-weight:600; color:#0F172A; cursor:pointer; min-height:48px; font-family:inherit;
+}
+.ps-date-opt--on { background:#EFF6FF; border-color:#3B82F6; color:#1D4ED8; }
 .ps-date-input {
-  width: 100%; height: 44px; padding: 0 12px;
-  border: 1.5px solid #CFD8E8; border-radius: 12px;
-  font-size: 14px; color: #0D1B3E; background: #FAFAFA;
-  outline: none; font-family: inherit;
-}
-.ps-date-input:focus { border-color: #1565C0; background: #fff; }
-
-/* Remove old auth-strip and sec-hdr styles (still in CSS but unused — safe to keep) */
-/* Gender grid: 2 cols only now */
-.ps-gender-grid {
-  display: grid; grid-template-columns: 1fr 1fr;
-  gap: 8px; margin: 12px 14px 6px;
+  width:100%; box-sizing:border-box; background:#F8FAFC;
+  border:1.5px solid rgba(0,0,0,.1); border-radius:8px; color:#0F172A;
+  font-size:16px; padding:10px 12px; outline:none; font-family:inherit;
 }
 </style>
