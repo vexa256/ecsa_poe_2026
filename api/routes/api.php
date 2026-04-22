@@ -96,11 +96,14 @@ Route::get('/screening-records/{id}', [SSRC::class, 'show']);
 // Role enforcement: DISTRICT_SUPERVISOR (DISTRICT), PHEOC_OFFICER (PHEOC), NATIONAL_ADMIN (NATIONAL)
 Route::get('/alerts/summary', [AC::class, 'summary']);
 Route::get('/alerts/compliance', [\App\Http\Controllers\AlertFollowupsController::class, 'compliance']);
+Route::get('/alerts/close-categories', [AC::class, 'closeCategories']);
 Route::get('/alerts', [AC::class, 'index']);
 Route::post('/alerts', [AC::class, 'store']);
 Route::get('/alerts/{id}', [AC::class, 'show']);
 Route::patch('/alerts/{id}/acknowledge', [AC::class, 'acknowledge']);
 Route::patch('/alerts/{id}/close', [AC::class, 'close']);
+// /alerts/{id}/reopen is registered below under ACC (collaboration controller) —
+// keep this comment so nobody re-adds the AC duplicate that shadows it.
 Route::get('/alerts/{id}/followups', [\App\Http\Controllers\AlertFollowupsController::class, 'index']);
 Route::post('/alerts/{id}/followups', [\App\Http\Controllers\AlertFollowupsController::class, 'store']);
 Route::patch('/alert-followups/{id}', [\App\Http\Controllers\AlertFollowupsController::class, 'update']);
@@ -148,6 +151,206 @@ Route::post('/notifications/send',              [\App\Http\Controllers\Notificat
 Route::post('/notifications/retry-failed',      [\App\Http\Controllers\NotificationsController::class, 'retryFailed']);
 Route::get ('/notifications/log',               [\App\Http\Controllers\NotificationsController::class, 'log']);
 Route::get ('/notifications/stats',             [\App\Http\Controllers\NotificationsController::class, 'stats']);
+
+// ══════════════════════════════════════════════════════════════════════════
+//  COLLABORATION / WAR-ROOM — PWA admin endpoints
+//  All routes mount under the same /alerts/{id}/… hierarchy + companion
+//  resource routes on /alert-comments, /alert-collaborators, etc.
+// ══════════════════════════════════════════════════════════════════════════
+use App\Http\Controllers\AlertCollaborationController as ACC;
+Route::get   ('/alerts/{id}/war-room',                    [ACC::class, 'warRoom']);
+Route::get   ('/alerts/{id}/timeline',                    [ACC::class, 'timeline']);
+Route::get   ('/alerts/{id}/collaborators',               [ACC::class, 'collaborators']);
+Route::post  ('/alerts/{id}/collaborators',               [ACC::class, 'addCollaborator']);
+Route::patch ('/alert-collaborators/{id}',                [ACC::class, 'updateCollaborator']);
+Route::delete('/alert-collaborators/{id}',                [ACC::class, 'removeCollaborator']);
+Route::get   ('/alerts/{id}/comments',                    [ACC::class, 'comments']);
+Route::post  ('/alerts/{id}/comments',                    [ACC::class, 'postComment']);
+Route::patch ('/alert-comments/{id}',                     [ACC::class, 'editComment']);
+Route::delete('/alert-comments/{id}',                     [ACC::class, 'deleteComment']);
+Route::post  ('/alert-comments/{id}/pin',                 [ACC::class, 'togglePin']);
+Route::post  ('/alert-comments/{id}/react',               [ACC::class, 'reactToComment']);
+Route::get   ('/alerts/{id}/evidence',                    [ACC::class, 'evidence']);
+Route::post  ('/alerts/{id}/evidence',                    [ACC::class, 'addEvidence']);
+Route::delete('/alert-evidence/{id}',                     [ACC::class, 'deleteEvidence']);
+Route::get   ('/alerts/{id}/handoffs',                    [ACC::class, 'handoffs']);
+Route::post  ('/alerts/{id}/handoffs',                    [ACC::class, 'createHandoff']);
+Route::post  ('/alert-handoffs/{id}/accept',              [ACC::class, 'acceptHandoff']);
+Route::post  ('/alert-handoffs/{id}/reject',              [ACC::class, 'rejectHandoff']);
+Route::post  ('/alerts/{id}/escalate',                    [ACC::class, 'escalate']);
+Route::post  ('/alerts/{id}/reopen',                      [ACC::class, 'reopen']);
+Route::post  ('/alerts/{id}/reassign',                    [ACC::class, 'reassign']);
+Route::post  ('/alerts/{id}/breach-report',               [ACC::class, 'logBreachReport']);
+Route::get   ('/alerts/{id}/breach-reports',              [ACC::class, 'breachReports']);
+Route::patch ('/alert-breach-reports/{id}',               [ACC::class, 'updateBreachReport']);
+Route::post  ('/alerts/{id}/pheic-declare',               [ACC::class, 'declarePheic']);
+Route::post  ('/alerts/{id}/request-external-info',       [ACC::class, 'requestExternalInfo']);
+
+// ── External Responders (registry) ─────────────────────────────────────────
+use App\Http\Controllers\ExternalRespondersController as ERC;
+Route::get   ('/external-responders/stats',               [ERC::class, 'stats']);
+Route::get   ('/external-responders',                     [ERC::class, 'index']);
+Route::post  ('/external-responders',                     [ERC::class, 'store']);
+Route::get   ('/external-responders/{id}',                [ERC::class, 'show']);
+Route::patch ('/external-responders/{id}',                [ERC::class, 'update']);
+Route::delete('/external-responders/{id}',                [ERC::class, 'destroy']);
+
+// ── Responder Info Requests (inbound response loop) ────────────────────────
+use App\Http\Controllers\ResponderInfoRequestsController as RIR;
+Route::get  ('/responder-info-requests',                          [RIR::class, 'index']);
+Route::get  ('/responder-info-requests/by-token/{token}',         [RIR::class, 'byToken']);
+Route::post ('/responder-info-requests/by-token/{token}/respond', [RIR::class, 'respond']);
+Route::get  ('/responder-info-requests/{id}',                     [RIR::class, 'show']);
+Route::post ('/responder-info-requests/{id}/cancel',              [RIR::class, 'cancel']);
+
+// ── Notification Templates (admin CRUD + preview) ──────────────────────────
+use App\Http\Controllers\NotificationTemplatesController as NTC;
+Route::get   ('/notification-templates/token-reference',   [NTC::class, 'tokenReference']);
+Route::get   ('/notification-templates',                   [NTC::class, 'index']);
+Route::post  ('/notification-templates',                   [NTC::class, 'store']);
+Route::get   ('/notification-templates/{code}/usage',      [NTC::class, 'usage']);
+Route::post  ('/notification-templates/{code}/preview',    [NTC::class, 'preview']);
+Route::get   ('/notification-templates/{code}',            [NTC::class, 'show']);
+Route::patch ('/notification-templates/{code}',            [NTC::class, 'update']);
+Route::delete('/notification-templates/{code}',            [NTC::class, 'destroy']);
+
+// ── Intelligence Dashboard ─────────────────────────────────────────────────
+use App\Http\Controllers\IntelligenceController as IC;
+Route::get('/intelligence/dashboard',               [IC::class, 'dashboard']);
+Route::get('/intelligence/silent-poes',             [IC::class, 'silentPoes']);
+Route::get('/intelligence/unsubmitted',             [IC::class, 'unsubmitted']);
+Route::get('/intelligence/dormant-accounts',        [IC::class, 'dormantAccounts']);
+Route::get('/intelligence/stuck-alerts',            [IC::class, 'stuckAlerts']);
+Route::get('/intelligence/overdue-followups',       [IC::class, 'overdueFollowups']);
+Route::get('/intelligence/case-spikes',             [IC::class, 'caseSpikes']);
+Route::get('/intelligence/kpi/seven-one-seven',     [IC::class, 'sevenOneSeven']);
+Route::get('/intelligence/timeline/national',       [IC::class, 'nationalTimeline']);
+Route::get('/intelligence/disease-ranking',         [IC::class, 'diseaseRankingAction']);
+Route::get('/intelligence/heatmap/poes',            [IC::class, 'heatmapPoes']);
+Route::get('/intelligence/map/latest',              [IC::class, 'mapLatest']);
+
+// ── Digests (admin preview + manual trigger) ───────────────────────────────
+use App\Http\Controllers\DigestsController as DC;
+Route::get ('/digests/daily/preview',        [DC::class, 'previewDaily']);
+Route::get ('/digests/national/preview',     [DC::class, 'previewNational']);
+Route::post('/digests/daily/send',           [DC::class, 'sendDaily']);
+Route::post('/digests/national/send',        [DC::class, 'sendNational']);
+Route::post('/digests/followups/send',       [DC::class, 'sendFollowups']);
+Route::post('/digests/retry-failed',         [DC::class, 'retryFailed']);
+Route::get ('/digests/history',              [DC::class, 'history']);
+
+// ── Notifications Inbox (per-user) ─────────────────────────────────────────
+use App\Http\Controllers\NotificationsInboxController as NIC;
+Route::get ('/inbox/unread-count',  [NIC::class, 'unreadCount']);
+Route::get ('/inbox/facets',        [NIC::class, 'facets']);
+Route::post('/inbox/mark-read',     [NIC::class, 'markRead']);
+Route::post('/inbox/mark-unread',   [NIC::class, 'markUnread']);
+Route::post('/inbox/mark-all-read', [NIC::class, 'markAllRead']);
+Route::get ('/inbox',               [NIC::class, 'index']);
+Route::get ('/inbox/{id}',          [NIC::class, 'show']);
+
+// ══════════════════════════════════════════════════════════════════════════
+//  DASHBOARD AUTH (v2) — native Laravel auth + Sanctum bearer tokens
+//  Only the master web PWA uses these. The mobile app keeps its custom
+//  /auth/login pathway above (UserLoginController).
+// ══════════════════════════════════════════════════════════════════════════
+use App\Http\Controllers\Auth\DashboardAuthController as DAC;
+use App\Http\Controllers\Auth\DashboardEmailVerificationController as DEVC;
+use App\Http\Controllers\Auth\DashboardPasswordResetController as DPRC;
+use App\Http\Controllers\Auth\TwoFactorController as TFC;
+use App\Http\Controllers\Auth\TrustedDeviceController as TDC;
+use App\Http\Controllers\Admin\UsersAdminController as UAC;
+use App\Http\Controllers\Admin\UserAssignmentsController as UASC;
+use App\Http\Controllers\Admin\GeographyController as GEO;
+use App\Http\Controllers\Admin\SystemHealthController as SHC;
+use App\Http\Controllers\Admin\AuditController as AUC;
+
+// ── Public endpoints (no auth) ────────────────────────────────────────────
+Route::prefix('v2/auth')->group(function () {
+    Route::post('/login',                 [DAC::class, 'login']);
+    Route::post('/2fa-verify',            [DAC::class, 'twoFaVerify']);
+    Route::post('/password/forgot',       [DPRC::class, 'forgot']);
+    Route::post('/password/reset',        [DPRC::class, 'reset']);
+    Route::post('/verify-email/confirm',  [DEVC::class, 'confirm']);
+    Route::post('/verify-email/send-for', [DEVC::class, 'sendFor']);
+    Route::post('/accept-invitation',     [UAC::class,  'acceptInvitation']);
+});
+
+// ── Authenticated endpoints (Sanctum bearer) ──────────────────────────────
+Route::prefix('v2')->middleware('auth:sanctum')->group(function () {
+
+    // Self-service auth
+    Route::get  ('/auth/me',                [DAC::class, 'me']);
+    Route::patch('/auth/me',                [DAC::class, 'updateMe']);
+    Route::post ('/auth/logout',            [DAC::class, 'logout']);
+    Route::post('/auth/logout-all',        [DAC::class, 'logoutAll']);
+    Route::post('/auth/refresh',           [DAC::class, 'refresh']);
+    Route::post('/auth/change-password',   [DAC::class, 'changePassword']);
+    Route::get ('/auth/sessions',          [DAC::class, 'sessions']);
+    Route::delete('/auth/sessions/{id}',   [DAC::class, 'revokeSession']);
+
+    Route::post('/auth/verify-email/send', [DEVC::class, 'send']);
+
+    Route::get ('/auth/2fa/status',              [TFC::class, 'status']);
+    Route::post('/auth/2fa/setup',               [TFC::class, 'setup']);
+    Route::post('/auth/2fa/confirm',             [TFC::class, 'confirm']);
+    Route::post('/auth/2fa/disable',             [TFC::class, 'disable']);
+    Route::post('/auth/2fa/recovery-codes',      [TFC::class, 'regenerateRecoveryCodes']);
+
+    Route::get ('/auth/trusted-devices',           [TDC::class, 'index']);
+    Route::post('/auth/trusted-devices',           [TDC::class, 'register']);
+    Route::delete('/auth/trusted-devices/{id}',    [TDC::class, 'revoke']);
+    Route::post('/auth/trusted-devices/revoke-all',[TDC::class, 'revokeAll']);
+
+    // Admin surface — requires NATIONAL_ADMIN / PHEOC_OFFICER / DISTRICT_SUPERVISOR / POE_ADMIN
+    Route::prefix('admin')->middleware('role:NATIONAL_ADMIN,PHEOC_OFFICER,DISTRICT_SUPERVISOR,POE_ADMIN')->group(function () {
+        // Users
+        Route::get   ('/users/stats',                    [UAC::class, 'stats']);
+        Route::get   ('/users/report/risk',              [UAC::class, 'reportRisk']);
+        Route::get   ('/users/report/roles',             [UAC::class, 'reportRoles']);
+        Route::get   ('/users/report/dormant',           [UAC::class, 'reportDormant']);
+        Route::get   ('/users/report/mfa',               [UAC::class, 'reportMfa']);
+        Route::post  ('/users/bulk',                     [UAC::class, 'bulk']);
+        Route::post  ('/users/scan-all',                 [UAC::class, 'scanAll']);
+        Route::get   ('/users',                          [UAC::class, 'index']);
+        Route::post  ('/users',                          [UAC::class, 'store']);
+        Route::get   ('/users/{id}',                     [UAC::class, 'show']);
+        Route::patch ('/users/{id}',                     [UAC::class, 'update']);
+        Route::delete('/users/{id}',                     [UAC::class, 'destroy']);
+        Route::post  ('/users/{id}/suspend',             [UAC::class, 'suspend']);
+        Route::post  ('/users/{id}/reactivate',          [UAC::class, 'reactivate']);
+        Route::post  ('/users/{id}/reset-password',      [UAC::class, 'resetPassword']);
+        Route::post  ('/users/{id}/force-mfa-reset',     [UAC::class, 'forceMfaReset']);
+        Route::post  ('/users/{id}/rescan',              [UAC::class, 'rescan']);
+        Route::get   ('/users/{id}/activity',            [UAC::class, 'activity']);
+        Route::get   ('/users/{id}/flags',               [UAC::class, 'flags']);
+        Route::post  ('/users/{id}/flags/{flagId}/clear',[UAC::class, 'clearFlag']);
+
+        // User assignments
+        Route::get   ('/users/{id}/assignments',         [UASC::class, 'indexForUser']);
+        Route::post  ('/users/{id}/assignments',         [UASC::class, 'store']);
+        Route::get   ('/assignments',                    [UASC::class, 'searchAll']);
+        Route::patch ('/user-assignments/{id}',          [UASC::class, 'update']);
+        Route::delete('/user-assignments/{id}',          [UASC::class, 'destroy']);
+
+        // Geography
+        Route::get('/geography/countries', [GEO::class, 'countries']);
+        Route::get('/geography/districts', [GEO::class, 'districts']);
+        Route::get('/geography/poes',      [GEO::class, 'poes']);
+        Route::get('/geography/tree',      [GEO::class, 'tree']);
+
+        // System Health
+        Route::get('/system/health', [SHC::class, 'health']);
+
+        // Audit
+        Route::get('/audit/feed',          [AUC::class, 'feed']);
+        Route::get('/audit/auth',          [AUC::class, 'auth']);
+        Route::get('/audit/users',         [AUC::class, 'users']);
+        Route::get('/audit/alerts',        [AUC::class, 'alerts']);
+        Route::get('/audit/notifications', [AUC::class, 'notifications']);
+        Route::get('/audit/stats',         [AUC::class, 'stats']);
+    });
+});
 
 // ── Users ──────────────────────────────────────────────────────────────────
 // ⚠ /me BEFORE /{id}

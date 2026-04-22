@@ -1716,6 +1716,26 @@ final class SecondaryScreeningController extends Controller
                     'ihr_tier2'      => $ihrTier2,
                 ]);
 
+                // ═══════════════════════════════════════════════════════════
+                // CASE-FILE EMAIL DISPATCH
+                //
+                // Fires whenever a sync settles a case at a non-NON_CASE
+                // disposition. The dispatcher runs anti-spam suppression so
+                // repeated fullSync calls within ALERT_CASE_FILE's window
+                // (6h) don't re-blast the roster — but a fresh disposition
+                // (status_changed) is honoured because the suppression key
+                // is per template_code+entity_id+contact, not per call.
+                // ═══════════════════════════════════════════════════════════
+                $disp = strtoupper((string) ($updatedCase->final_disposition ?? ''));
+                $isCase = ! in_array($disp, ['', 'NON_CASE', 'NOT_A_CASE', 'NONE'], true);
+                if ($isCase && $statusChanged) {
+                    try {
+                        \App\Services\NotificationDispatcher::dispatchCaseFile($updatedCase, $userId);
+                    } catch (\Throwable $e) {
+                        Log::warning('[SecondaryScreening][fullSync] case-file dispatch failed: ' . $e->getMessage());
+                    }
+                }
+
                 return $this->ok($this->formatCase($updatedCase), 'Full sync completed.', [
                     'server_id'                 => $id,
                     'case_updated'              => $caseUpdated,

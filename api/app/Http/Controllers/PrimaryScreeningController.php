@@ -516,6 +516,17 @@ final class PrimaryScreeningController extends Controller
             'user_id'          => $userId,
         ]);
 
+        // Fire-and-forget email notification when a referral is created.
+        // Silent on no-referral / low-priority; emits HIGH/CRITICAL template
+        // to the POE + DISTRICT + PHEOC + NATIONAL ladder.
+        $notificationDispatch = null;
+        if ($symptomsPresent === 1 && $notif) {
+            $notificationDispatch = \App\Services\NotificationDispatcher::dispatchScreeningReferral(
+                $inserted, $notif, $userId
+            );
+            Log::info('[PrimaryScreeningController] Referral notification dispatched', (array) $notificationDispatch);
+        }
+
         $responseMessage = $symptomsPresent === 1
             ? 'Primary screening recorded. Symptomatic traveler — referral notification created (priority: ' . $priority . ').'
             : 'Primary screening recorded. No symptoms detected.';
@@ -525,6 +536,7 @@ final class PrimaryScreeningController extends Controller
             'message'    => $responseMessage,
             'idempotent' => false,
             'data'       => $this->formatScreening($inserted, $notif),
+            'notification' => $notificationDispatch,
         ], 201);
     }
 

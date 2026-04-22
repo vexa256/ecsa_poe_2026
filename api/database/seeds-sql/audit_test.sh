@@ -647,6 +647,265 @@ assert_eq "published templates response includes reporting_frequency" "True" "$h
 sql "DELETE FROM aggregated_submissions WHERE client_uuid='$sub_uuid';"
 
 # ═══════════════════════════════════════════════════════════════════════════
+# SECTION 7.8 — NOTIFICATION DELIVERY LAYER (2026-04-21 v5)
+# ═══════════════════════════════════════════════════════════════════════════
+# Validates that:
+#   • All 12 premium email templates are in place with premium HTML body
+#   • The 19 Uganda national contacts are seeded with correct flags
+#   • SMTP config points at Gmail (not the default 127.0.0.1 stub)
+#   • Console commands are registered with Laravel
+#   • NotificationDispatcher generates log rows for alerts and screenings
+section "7.8 Notification delivery layer"
+
+# 1) Templates: count + premium HTML (> 2 KB of inline-styled markup)
+# Post v6: ≥ 12 (12 base + 3 engine v6: CASE_FILE, NATIONAL_INTELLIGENCE, RESPONDER_INFO_REQUEST)
+tpl_count=$(sql "SELECT COUNT(*) FROM notification_templates WHERE is_active=1;")
+if [[ "$tpl_count" -ge 12 ]]; then ok "≥ 12 active notification templates (got $tpl_count)"
+else bad "active notification templates" "expected ≥12 got $tpl_count"; fi
+
+premium_tpls=$(sql "SELECT COUNT(*) FROM notification_templates WHERE is_active=1 AND LENGTH(body_html_template) > 2000;")
+if [[ "$premium_tpls" -ge 12 ]]; then ok "≥ 12 premium templates (>2 KB HTML each, got $premium_tpls)"
+else bad "premium templates" "expected ≥12 got $premium_tpls"; fi
+
+for code in ALERT_CRITICAL ALERT_HIGH TIER1_ADVISORY ANNEX2_HIT BREACH_717 \
+            FOLLOWUP_DUE FOLLOWUP_OVERDUE DAILY_REPORT WEEKLY_REPORT \
+            ESCALATION PHEIC_ADVISORY ALERT_CLOSED; do
+  has=$(sql "SELECT COUNT(*) FROM notification_templates WHERE template_code='$code' AND channel='EMAIL' AND is_active=1;")
+  [[ "$has" == "1" ]] && ok "template '$code' present" || bad "template '$code' present" "count=$has"
+done
+
+# 2) Uganda 19-contact national roster
+ug_count=$(sql "SELECT COUNT(*) FROM poe_notification_contacts WHERE country_code='UG' AND level='NATIONAL' AND deleted_at IS NULL AND is_active=1;")
+if [[ "$ug_count" -ge 19 ]]; then ok "Uganda national roster has ≥ 19 contacts (got $ug_count)"
+else bad "Uganda national roster" "expected ≥19 got $ug_count"; fi
+
+# Key primary + CC emails present
+for email in ayebare.k.timothy@gmail.com ayebaretimothykamukama@gmail.com \
+             bkisunzu@gmail.com gsilverbert@yahoo.com \
+             ssulaiman@hispuganda.org; do
+  has=$(sql "SELECT COUNT(*) FROM poe_notification_contacts WHERE email='$email' AND deleted_at IS NULL;")
+  [[ "$has" == "1" ]] && ok "roster contact $email seeded" || bad "roster contact $email" "count=$has"
+done
+
+# Primary (priority_order=1) must be ayebare.k.timothy@gmail.com
+primary_email=$(sql "SELECT email FROM poe_notification_contacts WHERE country_code='UG' AND level='NATIONAL' AND priority_order=1 AND deleted_at IS NULL LIMIT 1;")
+assert_eq "primary recipient is Ayebare Timothy (priority 1)" "ayebare.k.timothy@gmail.com" "$primary_email"
+
+# 3) SMTP config
+mail_host=$(grep -E "^MAIL_HOST=" /home/hacker/ecsa_poe_2026/api/.env | head -1 | cut -d= -f2)
+assert_eq "MAIL_HOST=smtp.gmail.com" "smtp.gmail.com" "$mail_host"
+mail_port=$(grep -E "^MAIL_PORT=" /home/hacker/ecsa_poe_2026/api/.env | head -1 | cut -d= -f2)
+assert_eq "MAIL_PORT=587" "587" "$mail_port"
+mail_encrypt=$(grep -E "^MAIL_ENCRYPTION=" /home/hacker/ecsa_poe_2026/api/.env | head -1 | cut -d= -f2)
+assert_eq "MAIL_ENCRYPTION=tls" "tls" "$mail_encrypt"
+# Post v6: FROM must equal USERNAME for Gmail anti-spoof. Reply-To carries
+# vexa256@gmail.com so humans land in the operations mailbox.
+mail_from=$(grep -E "^MAIL_FROM_ADDRESS=" /home/hacker/ecsa_poe_2026/api/.env | head -1 | cut -d= -f2 | tr -d '"')
+mail_user=$(grep -E "^MAIL_USERNAME=" /home/hacker/ecsa_poe_2026/api/.env | head -1 | cut -d= -f2 | tr -d '"')
+assert_eq "MAIL_FROM_ADDRESS == MAIL_USERNAME (anti-rewrite)" "$mail_user" "$mail_from"
+
+# 4) Laravel console commands registered
+for cmd in "notifications:daily-digest" "notifications:followup-reminders" "notifications:retry-failed"; do
+  hits=$(cd /home/hacker/ecsa_poe_2026/api && php artisan list 2>/dev/null | grep -c "$cmd")
+  [[ "$hits" -ge 1 ]] && ok "artisan command '$cmd' registered" || bad "artisan command '$cmd'" "not found"
+done
+
+# 5) NotificationDispatcher integration — create a scratch alert and confirm
+#    the log record was written by the trigger wiring.
+#    We seed the alert directly via SQL then invoke the dispatcher through
+#    the API (POST /alerts) so the full pipeline runs.
+sec_id=$(sql "SELECT id FROM secondary_screenings WHERE deleted_at IS NULL LIMIT 1;")
+if [[ -n "$sec_id" && "$sec_id" != "NULL" ]]; then
+  alert_uuid=$(python3 -c "import uuid; print(uuid.uuid4())")
+  code=$(api_status POST "/alerts" "{
+    \"created_by_user_id\": $ID_NAT,
+    \"client_uuid\": \"$alert_uuid\",
+    \"reference_data_version\": \"rda-2026-02-01\",
+    \"secondary_screening_id\": $sec_id,
+    \"alert_code\": \"AUDIT_NOTIF_$TIMESTAMP\",
+    \"alert_title\": \"Audit notification trigger\",
+    \"alert_details\": \"Triggered by audit test $TIMESTAMP\",
+    \"risk_level\": \"HIGH\",
+    \"routed_to_level\": \"DISTRICT\",
+    \"generated_from\": \"OFFICER\",
+    \"device_id\": \"audit\",
+    \"platform\": \"WEB\",
+    \"record_version\": 1
+  }")
+  assert_eq "POST /alerts creates alert and returns 200" "200" "$code"
+
+  # notification_log should now have rows keyed by this alert's code
+  log_rows=$(sql "SELECT COUNT(*) FROM notification_log WHERE related_entity_type='ALERT' AND related_entity_id=(SELECT id FROM alerts WHERE client_uuid='$alert_uuid' LIMIT 1);")
+  if [[ "$log_rows" -ge 1 ]]; then ok "alert creation produced notification_log rows (got $log_rows)"
+  else bad "alert creation produced log rows" "got 0"; fi
+
+  # At least one row should be targeted at a Uganda national contact
+  ug_rows=$(sql "SELECT COUNT(*) FROM notification_log WHERE related_entity_type='ALERT' AND related_entity_id=(SELECT id FROM alerts WHERE client_uuid='$alert_uuid' LIMIT 1) AND to_email LIKE '%@%';")
+  if [[ "$ug_rows" -ge 1 ]]; then ok "notification_log carries recipient emails (got $ug_rows)"
+  else bad "notification_log recipient emails" "got 0"; fi
+
+  # Template used should be ALERT_HIGH (risk=HIGH, no Tier 1)
+  tpl_used=$(sql "SELECT template_code FROM notification_log WHERE related_entity_type='ALERT' AND related_entity_id=(SELECT id FROM alerts WHERE client_uuid='$alert_uuid' LIMIT 1) ORDER BY id DESC LIMIT 1;")
+  [[ "$tpl_used" == "ALERT_HIGH" ]] && ok "notification_log used ALERT_HIGH template" || bad "template used" "got $tpl_used"
+
+  # Teardown
+  sql "DELETE FROM notification_log WHERE related_entity_type='ALERT' AND related_entity_id=(SELECT id FROM alerts WHERE client_uuid='$alert_uuid' LIMIT 1);"
+  sql "DELETE FROM alerts WHERE client_uuid='$alert_uuid';"
+else
+  ok "skipping alert-trigger integration test (no secondary screenings in DB)"
+fi
+
+# ═══════════════════════════════════════════════════════════════════════════
+# SECTION 7.9 — ALERT ENGINE v6 (anti-spam + case-file + intelligence + RTSL seed)
+# ═══════════════════════════════════════════════════════════════════════════
+section "7.9 Alert engine v6 — deterministic, country-aware, anti-spam"
+
+# 1. New schema artefacts present
+for tbl in notification_suppressions external_responders responder_info_requests; do
+  exists=$(sql "SHOW TABLES LIKE '$tbl';")
+  [[ -n "$exists" ]] && ok "table '$tbl' exists" || bad "table '$tbl'" "missing"
+done
+
+# 2. New templates present + are premium HTML
+for code in ALERT_CASE_FILE NATIONAL_INTELLIGENCE RESPONDER_INFO_REQUEST; do
+  bytes=$(sql "SELECT IFNULL(LENGTH(body_html_template), 0) FROM notification_templates WHERE template_code='$code' AND channel='EMAIL' AND is_active=1;")
+  [[ "$bytes" -gt 1500 ]] && ok "template '$code' present + ≥ 1.5 KB ($bytes bytes)" || bad "template '$code'" "size=$bytes"
+done
+
+# 3. Mail FROM matches USERNAME (deliverability fix)
+mail_from=$(grep -E "^MAIL_FROM_ADDRESS=" /home/hacker/ecsa_poe_2026/api/.env | head -1 | cut -d= -f2 | tr -d '"')
+mail_user=$(grep -E "^MAIL_USERNAME=" /home/hacker/ecsa_poe_2026/api/.env | head -1 | cut -d= -f2 | tr -d '"')
+assert_eq "MAIL_FROM_ADDRESS == MAIL_USERNAME (anti-rewrite/anti-spam)" "$mail_user" "$mail_from"
+mail_reply=$(grep -E "^MAIL_REPLY_TO_ADDRESS=" /home/hacker/ecsa_poe_2026/api/.env | head -1 | cut -d= -f2 | tr -d '"')
+[[ "$mail_reply" == "vexa256@gmail.com" ]] && ok "MAIL_REPLY_TO_ADDRESS routes humans back to operations mailbox" || bad "MAIL_REPLY_TO_ADDRESS" "got '$mail_reply'"
+
+# 4. National-digest console command registered + scheduled
+hits=$(cd /home/hacker/ecsa_poe_2026/api && php artisan list 2>/dev/null | grep -c "notifications:national-digest")
+[[ "$hits" -ge 1 ]] && ok "artisan command 'notifications:national-digest' registered" || bad "national-digest command" "not found"
+hits=$(cd /home/hacker/ecsa_poe_2026/api && php artisan schedule:list 2>/dev/null | grep -c "notifications:national-digest")
+[[ "$hits" -ge 1 ]] && ok "national-digest scheduled (every 3 days)" || bad "national-digest schedule" "not registered"
+
+# 5. RTSL 14 auto-seed — create an alert and verify follow-ups land
+sec_id=$(sql "SELECT id FROM secondary_screenings WHERE deleted_at IS NULL LIMIT 1;")
+if [[ -n "$sec_id" && "$sec_id" != "NULL" ]]; then
+  alert_uuid=$(python3 -c "import uuid; print(uuid.uuid4())")
+  resp=$(api_body POST "/alerts" "{
+    \"created_by_user_id\": $ID_NAT, \"client_uuid\": \"$alert_uuid\",
+    \"reference_data_version\": \"rda-2026-02-01\", \"secondary_screening_id\": $sec_id,
+    \"alert_code\": \"AUDIT_RTSL_$TIMESTAMP\", \"alert_title\": \"Audit RTSL seed\",
+    \"alert_details\": \"verify rtsl auto-seed\", \"risk_level\": \"HIGH\",
+    \"routed_to_level\": \"DISTRICT\", \"generated_from\": \"OFFICER\",
+    \"device_id\": \"audit\", \"platform\": \"WEB\", \"record_version\": 1
+  }")
+  alert_id=$(sql "SELECT id FROM alerts WHERE client_uuid='$alert_uuid' LIMIT 1;")
+  if [[ -n "$alert_id" && "$alert_id" != "NULL" ]]; then
+    seeded=$(sql "SELECT COUNT(*) FROM alert_followups WHERE alert_id=$alert_id AND deleted_at IS NULL;")
+    assert_eq "POST /alerts auto-seeds 14 RTSL follow-ups" "14" "$seeded"
+    # 6 of 14 RTSL actions block alert closure (CASE_INVESTIGATION, ISOLATION,
+    # CONTACT_LISTING, CONTACT_TRACING, EOC_ACTIVATION, WHO_NOTIFICATION).
+    blockers=$(sql "SELECT COUNT(*) FROM alert_followups WHERE alert_id=$alert_id AND blocks_closure=1 AND deleted_at IS NULL;")
+    assert_eq "6 of the 14 follow-ups are blocks_closure=1" "6" "$blockers"
+
+    # Re-POST the same alert (idempotent) — RTSL seed must not duplicate
+    api_status POST "/alerts" "{
+      \"created_by_user_id\": $ID_NAT, \"client_uuid\": \"$alert_uuid\",
+      \"reference_data_version\": \"rda-2026-02-01\", \"secondary_screening_id\": $sec_id,
+      \"alert_code\": \"AUDIT_RTSL_$TIMESTAMP\", \"alert_title\": \"Audit RTSL seed\",
+      \"alert_details\": \"verify rtsl auto-seed\", \"risk_level\": \"HIGH\",
+      \"routed_to_level\": \"DISTRICT\", \"generated_from\": \"OFFICER\",
+      \"device_id\": \"audit\", \"platform\": \"WEB\", \"record_version\": 1
+    }" >/dev/null
+    seeded2=$(sql "SELECT COUNT(*) FROM alert_followups WHERE alert_id=$alert_id AND deleted_at IS NULL;")
+    assert_eq "RTSL seed is idempotent (still 14 after re-POST)" "14" "$seeded2"
+
+    # 6. ANTI-SPAM SUPPRESSION — direct dispatcher invocation
+    #    AlertsController returns idempotently on duplicate client_uuid, so
+    #    we exercise the suppression check by calling the dispatcher twice
+    #    against the same alert via php artisan tinker --execute.
+    supp_before=$(sql "SELECT COUNT(*) FROM notification_suppressions WHERE related_entity_type='ALERT' AND related_entity_id=$alert_id;")
+    [[ "$supp_before" -gt 0 ]] && ok "first dispatch wrote $supp_before suppression rows" || bad "first dispatch suppression rows" "got 0"
+
+    skipped_before=$(sql "SELECT COUNT(*) FROM notification_log WHERE related_entity_type='ALERT' AND related_entity_id=$alert_id AND status='SKIPPED';")
+    sent_before=$(sql "SELECT COUNT(*) FROM notification_log WHERE related_entity_type='ALERT' AND related_entity_id=$alert_id AND status='SENT';")
+
+    cd /home/hacker/ecsa_poe_2026/api && php -r "
+      require '/home/hacker/ecsa_poe_2026/api/vendor/autoload.php';
+      \$app = require '/home/hacker/ecsa_poe_2026/api/bootstrap/app.php';
+      \$app->make('Illuminate\\Contracts\\Console\\Kernel')->bootstrap();
+      \$alert = \DB::table('alerts')->where('id', $alert_id)->first();
+      \App\Services\NotificationDispatcher::dispatchAlertCreated(\$alert, $ID_NAT);
+    " >/dev/null 2>&1
+
+    sent_after=$(sql "SELECT COUNT(*) FROM notification_log WHERE related_entity_type='ALERT' AND related_entity_id=$alert_id AND status='SENT';")
+    skipped_after=$(sql "SELECT COUNT(*) FROM notification_log WHERE related_entity_type='ALERT' AND related_entity_id=$alert_id AND status='SKIPPED' AND error_message LIKE 'Suppressed%';")
+
+    assert_eq "second dispatch produces 0 new SENT rows (suppression worked)" "$sent_before" "$sent_after"
+    [[ "$skipped_after" -gt "$skipped_before" ]] && ok "second dispatch wrote SKIPPED-Suppressed log rows ($skipped_after)" || bad "anti-spam SKIPPED rows" "before=$skipped_before after=$skipped_after"
+
+    # Cleanup
+    sql "DELETE FROM notification_log WHERE related_entity_type='ALERT' AND related_entity_id=$alert_id;"
+    sql "DELETE FROM notification_suppressions WHERE related_entity_type='ALERT' AND related_entity_id=$alert_id;"
+    sql "DELETE FROM alert_followups WHERE alert_id=$alert_id;"
+    sql "DELETE FROM alerts WHERE id=$alert_id;"
+  else
+    bad "alert created" "POST /alerts did not return an id"
+  fi
+else
+  ok "skipping alert-trigger tests (no secondary screenings in DB)"
+fi
+
+# 7. COUNTRY ISOLATION — seed a non-UG contact, verify a UG alert dispatch
+#    does NOT log a row to that contact.
+sql "INSERT INTO poe_notification_contacts
+  (country_code, district_code, poe_code, level, full_name, email, priority_order,
+   is_active, receives_critical, receives_high, created_by_user_id, created_at, updated_at)
+  VALUES ('RW', 'Kigali District', 'KigaliPOE', 'NATIONAL',
+   'RW Test Recipient', 'rw-isolated-$TIMESTAMP@audit.test', 1, 1, 1, 1, $ID_NAT, NOW(), NOW());"
+rw_id=$(sql "SELECT id FROM poe_notification_contacts WHERE email='rw-isolated-$TIMESTAMP@audit.test';")
+
+# Create a UG alert and confirm RW contact does NOT appear in its log rows
+sec_id2=$(sql "SELECT id FROM secondary_screenings WHERE deleted_at IS NULL AND country_code='UG' LIMIT 1;")
+if [[ -n "$sec_id2" && "$sec_id2" != "NULL" ]]; then
+  iso_uuid=$(python3 -c "import uuid; print(uuid.uuid4())")
+  api_status POST "/alerts" "{
+    \"created_by_user_id\": $ID_NAT, \"client_uuid\": \"$iso_uuid\",
+    \"reference_data_version\": \"rda-2026-02-01\", \"secondary_screening_id\": $sec_id2,
+    \"alert_code\": \"AUDIT_ISO_$TIMESTAMP\", \"alert_title\": \"Country isolation test\",
+    \"alert_details\": \"UG alert must not reach RW recipients\", \"risk_level\": \"HIGH\",
+    \"routed_to_level\": \"DISTRICT\", \"generated_from\": \"OFFICER\",
+    \"device_id\": \"audit\", \"platform\": \"WEB\", \"record_version\": 1
+  }" >/dev/null
+  iso_alert=$(sql "SELECT id FROM alerts WHERE client_uuid='$iso_uuid' LIMIT 1;")
+  cross_country=$(sql "SELECT COUNT(*) FROM notification_log WHERE related_entity_type='ALERT' AND related_entity_id=$iso_alert AND contact_id=$rw_id;")
+  assert_eq "country isolation: UG alert produced 0 log rows for RW contact" "0" "$cross_country"
+  sql "DELETE FROM notification_log WHERE related_entity_type='ALERT' AND related_entity_id=$iso_alert;"
+  sql "DELETE FROM notification_suppressions WHERE related_entity_type='ALERT' AND related_entity_id=$iso_alert;"
+  sql "DELETE FROM alert_followups WHERE alert_id=$iso_alert;"
+  sql "DELETE FROM alerts WHERE id=$iso_alert;"
+else
+  ok "skipping country-isolation test (no UG secondary screenings)"
+fi
+sql "DELETE FROM poe_notification_contacts WHERE id=$rw_id;"
+
+# 8. INTELLIGENCE ENGINE — narrative endpoint runs without throwing
+intel=$(cd /home/hacker/ecsa_poe_2026/api && php -r "
+  require '/home/hacker/ecsa_poe_2026/api/vendor/autoload.php';
+  \$app = require '/home/hacker/ecsa_poe_2026/api/bootstrap/app.php';
+  \$app->make('Illuminate\\Contracts\\Console\\Kernel')->bootstrap();
+  echo \App\Services\IntelligenceEngine::narrativeFor('UG');
+" 2>&1 | head -c 200)
+if echo "$intel" | grep -qE "(No anomalies detected|Detected:)"; then ok "IntelligenceEngine narrative renders ('${intel:0:60}…')"
+else bad "IntelligenceEngine narrative" "got: $intel"; fi
+
+# 9. National-digest dry-run via artisan command
+out=$(cd /home/hacker/ecsa_poe_2026/api && php artisan notifications:national-digest 2>&1 | tail -10)
+echo "$out" | grep -q "countries_processed" && ok "national-digest command runs to completion" || bad "national-digest dry-run" "no output"
+
+# Cleanup any digest rows created in this audit pass (so it stays a dry-run)
+sql "DELETE FROM notification_log WHERE template_code='NATIONAL_INTELLIGENCE' AND triggered_by='CRON:national-intel' AND created_at > NOW() - INTERVAL 1 MINUTE;"
+sql "DELETE FROM notification_suppressions WHERE template_code='NATIONAL_INTELLIGENCE' AND last_sent_at > NOW() - INTERVAL 1 MINUTE;"
+
+# ═══════════════════════════════════════════════════════════════════════════
 # SECTION 8 — IDEMPOTENCY
 # ═══════════════════════════════════════════════════════════════════════════
 section "8. Idempotency"

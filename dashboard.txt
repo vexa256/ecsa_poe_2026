@@ -1,0 +1,968 @@
+Refined MVP — National PHEOC Admin Panel
+Final Sidebar Menu — Professional Public Health Language
+Below is the complete, consolidated navigation — merging your current 20 items with every missing surface I identified, rewritten in precise, professional, public-health-appropriate English.
+
+📋 Final Menu (44 items across 9 sections)
+1. Today
+#LabelRouteStatus1Operations Dashboard/admin/dashboard✅ Live2National Situation Brief#🔜 Soon
+2. Surveillance & Screening
+Read-through to the clinical data captured in the field.
+#LabelRouteStatus3Primary Screening Activity#🔜 Soon4Secondary Screening Register#🔜 Soon5Case File Detail#🔜 Soon6Differential Diagnosis Review#🔜 Soon7Laboratory Samples#🔜 Soon
+3. Alerts & Response
+#LabelRouteStatus8Active Alerts/admin/alerts✅ Live9Alert History#🔜 Soon107-1-7 Compliance Board#🔜 Soon11Follow-up Actions#🔜 Soon12Timeliness Breaches#🔜 Soon
+4. Early Warning Intelligence
+Hardcoded detectors powered by the Intelligence Engine.
+#LabelRouteStatus13Intelligence Overview#🔜 Soon14Silent Points of Entry#🔜 Soon15Outstanding Report Submissions#🔜 Soon16Stalled Alerts#🔜 Soon17Overdue Response Actions#🔜 Soon18Case Trend Anomalies#🔜 Soon
+5. Communications
+#LabelRouteStatus19Notification Inbox#🔜 Soon20Outbound Email Log#🔜 Soon21Email Templates#🔜 Soon22Daily & Weekly Digests#🔜 Soon23Delivery Suppressions#🔜 Soon24External Responders#🔜 Soon25Information Requests#🔜 Soon
+6. Aggregated Reporting
+#LabelRouteStatus26Reporting Hub#🔜 Soon27Submit Period Report#🔜 Soon28Submissions Register#🔜 Soon29National Rollup#🔜 Soon30Report Template Library#🔜 Soon31Template Builder#🔜 Soon
+7. Workforce & Access
+#LabelRouteStatus32Personnel Directory/admin/users✅ Live33Role & Jurisdiction Assignments/admin/assignments✅ Live34Accounts Flagged for Review/admin/users/risk✅ Live35Dormant Accounts/admin/users/dormant✅ Live36Pending Invitations#🔜 Soon
+8. Reference Data
+#LabelRouteStatus37Notification Contact Roster/admin/settings/poe-contacts✅ Live38Points of Entry/admin/settings/poes✅ Live39Priority Disease Catalogue/admin/settings/diseases✅ Live40Exposure & Risk Factors/admin/settings/exposures✅ Live41Geography (Countries & Districts)#🔜 Soon
+9. System Administration
+#LabelRouteStatus42Audit Trail#🔜 Soon43Authentication Events#🔜 Soon44Platform Health#🔜 Soon
+
+🧭 Top Bar / User Menu (not in sidebar)
+These belong in the topbar, command palette, or user dropdown — not in the primary navigation:
+SurfaceLocationGlobal Search (⌘K)Command palette launcher in topbarKeyboard Shortcuts (⌘/)Help popover in topbarMy ProfileUser avatar dropdown → My ProfileSecurity & Sign-in (2FA, trusted devices, sessions, password)User avatar dropdown → SecurityNotification PreferencesUser avatar dropdown → Notification PreferencesApplication PreferencesUser avatar dropdown → PreferencesSign OutUser avatar dropdown → Sign Out
+
+📊 Language & Structure Notes
+Professional public-health terminology applied throughout:
+
+"Open cases" → "Active Alerts" (precise IHR/IDSR term)
+"Case files" → "Case File Detail" (distinguishes from register)
+"Response deadlines" → "7-1-7 Compliance Board" (the actual WHO framework name, with "Timeliness Breaches" as the overdue log)
+"Team members" → "Personnel Directory" (standard institutional language)
+"Where people work" → "Role & Jurisdiction Assignments" (matches user_assignments scope semantics)
+"Accounts to review" → "Accounts Flagged for Review" (explicit about the flag origin)
+"Quiet accounts" → "Dormant Accounts" (industry-standard term)
+"My messages" → "Notification Inbox" (matches NotificationsInboxController)
+"Emails sent" → "Outbound Email Log" (matches notification_log)
+"Outside responders" → "External Responders" (matches controller naming)
+"National briefing" → "National Situation Brief" (standard EOC terminology)
+"Report forms" → "Report Template Library" (precise)
+"District submissions" → "Submissions Register" (audit-grade language)
+"Who we email" → "Notification Contact Roster" (institutional)
+"Diseases we watch" → "Priority Disease Catalogue" (IDSR-aligned)
+"Travel & contact risks" → "Exposure & Risk Factors" (epidemiological standard)
+"Activity log" → "Audit Trail" (the correct term for a tamper-evident record)
+"System status" → "Platform Health" (distinguishes from epidemiological status)
+Ruling principle
+Build only what a national PHEOC director actually touches during an outbreak. Everything else is bloat. The test for every page: "If this screen disappeared during a Marburg outbreak, would response degrade?" If no → cut it.
+
+What to CUT from the amateur plan (and why)
+Cut	Reason
+§3.9 Tracked Diseases module	Reference data. DiseaseIntel.php (73KB) already exists server-side. Inline it into case/alert views as an AI tooltip — not a standalone module.
+§3.12.3 POE Directory	Read-only gazette of 61 POEs. Dropdown filter, not a page.
+§3.12.5 System Health	Ops concern, not PHEOC concern. Collapse into a single /admin/system status strip (1 page, no sub-routes).
+§3.10.5 Suppressions	Niche. Surface as a tab inside Activity Log, not a module.
+§3.10.6 Contact roster as separate module	Merge into Admin → Assignments (escalation ladder = role + scope).
+§3.12.6 Settings (self-service 2FA, trusted devices, sessions)	Already built in auth controllers. Ship existing endpoints behind one page, not five.
+All "CSV export" buttons on every list	Keep export on 3 reports that lawyers/ministers actually demand: 7-1-7 compliance PDF, case file PDF, audit trail CSV. Kill the rest.
+Phase P9 "polish" (command palette, keyboard shortcuts, i18n, RTL)	Post-MVP. Ship English-only, mouse-first.
+§3.11 aggregated 5-step wizard	Template CRUD already exists in API. Build ONE form, not a wizard. Wizards are amateur theatre.
+§3.2 "Alert matrix" cross-tab, "Alert intelligence cohort"	Two views of the same data. Keep ONE kanban + ONE list. Cohort math belongs in Intelligence Brief.
+French/Swahili scaffolding, RTL, a11y audit	Post-MVP.
+"Sync Queue" admin view for mobile reconciliation	Engineering tool, not PHEOC tool. CLI/Tinker only.
+Screener performance report, device health	POE-admin concern, not national. Nest inside POE drill-down, don't promote to national module.
+Quarterly IHR PDF as separate report	Same data as 7-1-7 board — add a "Generate quarterly PDF" button on that board. One artefact.
+~32 reports	Kill. A national director reads 5 artefacts: live dashboard, war-room case file, 7-1-7 scorecard, national 72h brief, audit export. Everything else is a chart inside those.
+The MVP: 7 modules, ~20 pages, 5 artefacts
+M1 — National Command Overview (/dashboard) — 1 page
+Single-screen cockpit. Auto-refresh 15s. Everything else in the app is a drill-down from here.
+
+Live KPI strip, alert feed (last 20), Uganda map with POE pins, 7-1-7 ring gauges, top silent POEs, action-required bar.
+AI panel (top-right, always visible): "PHEOC Copilot" — hardcoded deterministic heuristics over IntelligenceEngine output that produce prose recommendations: "3 alerts in Kasese district exceed the 14-day baseline for VHF syndromes. Recommend: declare district-level watch, pre-position RDT kits, notify Bwera Hospital (last case 47 days ago)." No LLM call — rules-based narrative generator keyed off disease × district × baseline × SLA state. Ships as App\Services\PheocCopilot.
+M2 — Alert Lifecycle: Hub + War Room (/alerts, /alerts/{id}) — 2 pages
+This is the product. Everything else serves this.
+
+Hub: kanban (CRITICAL/HIGH/MEDIUM/LOW) + filter bar. No separate "matrix", "intelligence", "history" views — one page, filters do the work.
+War Room: single page with in-page tabs (Timeline, Collaborators, Comments, Evidence, Handoffs, Follow-ups, Breaches, External Responders, Case Sheet). Every action (ack, escalate, reassign, reopen, PHEIC, close) is a button in one persistent action bar with RBAC gating via existing AuthorizeAlertAction pattern.
+Complete case lifecycle coverage (the user's hard requirement): every terminal state handled — CLOSED(RESOLVED), CLOSED(FALSE_POSITIVE), CLOSED(DUPLICATE → merged_into_alert_id), CLOSED(LOST_TO_FOLLOWUP), CLOSED(TRANSFERRED_OUT_OF_COUNTRY), CLOSED(DECEASED), CLOSED(OTHER + mandatory note). Reopen writes new timeline event. Blocks_closure follow-ups enforced server-side.
+AI per tab:
+Timeline tab: Copilot auto-writes a narrative summary of the alert-to-date ("Case opened 04:12 at Entebbe. Traveler ex-DRC presenting fever + conjunctival hemorrhage. Suspected VHF (Marburg 71% / Ebola 18%). 2 contacts traced. Sample EB-2026-0419 at UVRI — pending.")
+Close dialog: Copilot suggests the correct close_category from timeline evidence and warns if a blocks_closure follow-up is still open.
+Escalate button: Copilot pre-fills the escalation rationale with computed fields (SLA breach minutes, disease tier, cross-border flag).
+M3 — Case Files (/cases, /cases/{id}) — 2 pages
+The clinical register. Read-through to secondary_screenings + 6 children. One action: "Generate CASEFILE-XXX alert" if none exists. PDF export of case sheet. That's it.
+
+AI: differential diagnosis ranker driven by DiseaseIntel — shows confidence bars computed from symptom×exposure×travel match against disease hallmarks. Already half-built in secondary_suspected_diseases — expose it here.
+M4 — 7-1-7 Compliance Board (/compliance/717) — 1 page
+Three ring gauges + breach log + "Generate quarterly PDF" button. That's the whole module. Kills §3.7 + quarterly report redundancy.
+
+M5 — National Intelligence Brief (/intelligence) — 1 page
+Six tripwire cards (already exist in IntelligenceController). Auto-narrative paragraph at top (same text that goes into the 72h email). No sub-pages — each card expands inline.
+
+M6 — Communications (/comms) — 3 pages
+Collapse §3.10's six sub-modules to three:
+
+/comms/inbox — per-user inbox (exists)
+/comms/outbound — unified log + templates + digests + suppressions, switched by tab
+/comms/responders — external responders + public token portal config
+Public portal /respond/{token} — standalone, no auth, one page
+M7 — Administration (/admin/*) — 4 pages
+/admin/users — CRUD + lifecycle actions (suspend/reactivate/reset-pw/force-2fa) on ONE page with a drawer. No separate "risk report / roles report / dormant report" pages — they're facets on the user list.
+/admin/assignments — geography + escalation ladder (merged).
+/admin/audit — unified feed + CSV export.
+/admin/system — single strip: DB, queue, email pipeline, MFA %. Not a module.
+Aggregated reports (/aggregated) — 2 pages
+/aggregated/templates — list + single form (no wizard)
+/aggregated/submissions — list + per-period national rollup view
+Total: ~20 pages. Not 60.
+
+The 5 artefacts (not 32 reports)
+Live dashboard (HTML, always on)
+Case file PDF (per-alert, on-demand)
+7-1-7 quarterly compliance PDF (on-demand + quarterly cron)
+National 72h brief (HTML + email, cron)
+Audit trail CSV (on-demand, SHA-256 checksummed)
+Every other "report" is a chart embedded in one of the 7 modules.
+
+The "hardcoded insane AI" layer — App\Services\PheocCopilot
+Single service, zero LLM dependency, deterministic, testable. Exposes:
+
+narrate(alert) → timeline prose
+recommend(context) → next-action recommendation (drives overview "Copilot" panel)
+rankDifferentials(screening) → disease confidence ranking
+suggestCloseReason(alert) → close_category + rationale
+escalationRationale(alert) → pre-filled escalation text
+triageBrief(intelligence_snapshot) → the 72h narrative paragraph
+Rules keyed off DiseaseIntel + SLA state + geographic baselines. Every view calls these — AI is not a module, it's a cross-cutting pane.
+
+Stack confirmation
+Native Laravel + Blade + Tailwind + Alpine + Livewire for auto-refresh. Sanctum session for dashboard. Reuse all 23 existing controllers — dashboard controllers render Blade and internally call existing controllers' methods. No duplicated logic. This matches the user's amateur plan's intent but ruthlessly trimmed.
+
+Build order (5 phases, not 10 sprints)
+Foundation — admin layout (already scaffolded), PheocCopilot service, Blade component kit, AuthorizeAlertAction service.
+M1 + M2 — Overview + Alert Hub + War Room. Ship walking skeleton.
+M3 + M4 + M5 — Cases, 7-1-7, Intelligence.
+M6 + Aggregated — Comms + aggregated.
+M7 — Admin. Last because PHEOC director won't touch it during an outbreak.
+Verdict: The amateur plan is structurally correct but 3× too large. Cut 6 modules, 40 pages, 27 reports. Consolidate the AI layer into one deterministic service invoked across all views. The API is already built — this is a ~3-sprint UI build, not a 10-sprint one.
+
+Want me to start on Phase 1 (foundation + PheocCopilot scaffolding), or refine this further first?
+
+═══════════════════════════════════════════════════════════════════
+MASTER DIRECTIVE — LARAVEL ADMIN PANEL
+FULL UI/UX REFACTOR · FRESH RESTART EDITION
+═══════════════════════════════════════════════════════════════════
+
+⚠️ READ THIS ENTIRE PROMPT BEFORE WRITING A SINGLE LINE OF CODE.
+⚠️ THIS IS A FULL RESTART OF THE LARAVEL ADMIN PANEL.
+⚠️ EVERY EXISTING LARAVEL VIEW IS TREATED AS TRASH, BROKEN,
+   AND DANGEROUS. YOU WILL NOT COPY, IMITATE, OR SALVAGE
+   ANY EXISTING BLADE VIEW, PARTIAL, LAYOUT, OR COMPONENT.
+⚠️ THE STANDARDS DEFINED IN THIS PROMPT OVERRIDE EVERY OTHER
+   STANDARD, GUIDELINE, OR PRIOR INSTRUCTION IN THE PROJECT.
+
+═══════════════════════════════════════════════════════════════════
+PART 0 — WHAT THIS TASK IS AND IS NOT
+═══════════════════════════════════════════════════════════════════
+
+IS:
+- A complete rebuild of the Laravel admin panel's UI layer —
+  mother layout, sidebar, topbar, every view, every partial,
+  every component — to an insanely premium, wizard-guided,
+  data-rich, mobile-first standard.
+- A refactor that uses the EXISTING Laravel controllers,
+  routes, models, services, and database AS SOURCE OF TRUTH.
+- The general dashboard admin panel for the project.
+
+IS NOT:
+- A mobile-app task. You will NOT touch /src (Ionic app)
+  or /pwa (Vue dashboard) in this pass.
+- A backend refactor. You will NOT invent new controllers,
+  new routes, new migrations, or new business logic unless
+  absolutely required to wire up a broken but real flow.
+- A re-architecture of RBAC. RBAC stays in Laravel middleware,
+  routes, controllers, policies, and form requests — NEVER
+  in Blade views.
+
+═══════════════════════════════════════════════════════════════════
+PART 1 — PHASE 0: CONTINUITY LOCK (DO THIS BEFORE ANYTHING ELSE)
+═══════════════════════════════════════════════════════════════════
+
+Before reading Part 2 onward:
+
+1. Document exactly where you previously stopped in this project.
+2. Document the exact phase you were in.
+3. Document what has already been completed.
+4. Document what remains unfinished.
+5. Document what must be resumed after this UI task is done.
+6. Document what this task interrupts temporarily.
+
+Preserve that checkpoint with zero drift, zero memory loss,
+zero context corruption. Memorise it. State it back in your
+first response so I can verify it. Then pause that prior
+stream of work and attend only to this directive.
+
+═══════════════════════════════════════════════════════════════════
+PART 2 — MANDATORY CODEBASE STUDY (PHASE 1 — NON-NEGOTIABLE)
+═══════════════════════════════════════════════════════════════════
+
+A LOT has been built on the backend. You will NOT guess,
+invent, or hallucinate. You will study the real code before
+you propose, plan, or write anything.
+
+You will:
+
+1. READ EVERY EXISTING LARAVEL CONTROLLER
+   - api/app/Http/Controllers/**
+   - Including: AlertsController, AlertFollowupsController,
+     AlertCollaborationController, AggregatedTemplatesController,
+     PoeContactsController, NotificationsController,
+     NotificationsInboxController, NotificationTemplatesController,
+     ExternalRespondersController, ResponderInfoRequestsController,
+     IntelligenceController, DigestsController,
+     SecondaryScreeningController, PrimaryScreeningController,
+     HomeDashboardController, UserLoginController,
+     all Admin\* controllers, all Auth\* controllers.
+
+2. READ EVERY EXISTING ROUTE FILE
+   - api/routes/web.php
+   - api/routes/api.php
+   - api/routes/console.php
+
+3. READ EVERY EXISTING MIDDLEWARE, POLICY, FORM REQUEST,
+   AND SERVICE
+   - api/app/Http/Middleware/**
+   - api/app/Policies/**
+   - api/app/Http/Requests/**
+   - api/app/Services/** — especially NotificationDispatcher,
+     IntelligenceEngine, PheocCopilot, UserAnomalyService,
+     AuthEventLogger, AuthMailer, CaseContextBuilder.
+   - api/app/Support/** — especially DiseaseIntel.php,
+     blade_helpers.php, Totp.php.
+
+4. READ THE DATABASE SCHEMA
+   - app.sql (canonical)
+   - api/database/migrations/**
+   - api/database/seeds-sql/**
+   - Every table, every column, every enum, every index,
+     every foreign key. Know them.
+
+5. READ THE EXISTING DOCUMENTATION
+   - DEVELOPERS.md (the long one attached above)
+   - PROJECT-GUIDLINES.md
+   - readme.txt
+   - api/docs/**
+   - Any other markdown in the repo that describes intent.
+
+6. STUDY THE MOBILE APP VIEWS I HAVE ATTACHED
+   - SecondaryScreening.vue — this is the gold standard for
+     wizard sophistication, progressive disclosure, clinical
+     intelligence, and AI-hardcoded guidance. The Laravel
+     admin panel must MATCH OR EXCEED this level of
+     sophistication on every equivalent view.
+   - ActiveAlerts.vue, AlertIntelligence.vue, AlertMatrix.vue,
+     AlertHistory.vue — source of truth for alert workflows.
+   - AggregatedHub.vue, AggregatedData.vue, AggregatedWizard.vue,
+     AggregatedTemplateAdmin.vue — source of truth for
+     aggregated-reports wizard patterns.
+   - DiseaseInteligence.vue — disease intelligence patterns.
+   - HomePage.vue, MyProfile.vue, AppSettings.vue,
+     AlertHistory.vue — general layout & navigation patterns
+     and UX cues.
+
+   Where Laravel admin functionality is similar to a mobile
+   app view, BORROW THE LOGIC, THE INFORMATION ARCHITECTURE,
+   THE WIZARD STRUCTURE, AND THE INTELLIGENCE — then execute
+   it in Blade + Tailwind + Alpine + Livewire at premium
+   desktop/tablet/phone quality.
+
+YOU WILL PRODUCE A FULL AUDIT (PHASE 1 OUTPUT) BEFORE YOU
+TOUCH A SINGLE VIEW. That audit is described in Part 9.
+
+═══════════════════════════════════════════════════════════════════
+PART 3 — TREAT EXISTING LARAVEL VIEWS AS TRASH
+═══════════════════════════════════════════════════════════════════
+
+Every file currently under api/resources/views/** is:
+- Broken
+- Dangerous
+- Cluttered
+- Devoid of character
+- Missing stats and visualisations
+- Leaking raw database enums to users
+- Using oversized buttons and rainbow colour
+- Desktop-first or worse
+- Not wired to live functionality
+- Exposing system jargon users cannot parse
+- NOT to be copied, imitated, referenced, or partially reused
+
+Rules:
+- Do NOT open an existing Blade file and "improve" it.
+- Do NOT import existing partials "to save time."
+- Do NOT preserve existing class names, wrapper divs, or
+  structural patterns from old views.
+- DO build every view fresh from this directive, the
+  controllers/DB, and the mobile-app reference patterns.
+- The only Laravel view artefact you may preserve is the
+  NEW mother layout scaffold described in DEVELOPERS §17
+  (api/resources/views/admin/layout.blade.php and its
+  partials) — and even that must be re-evaluated against
+  this directive and upgraded wherever it falls short.
+
+═══════════════════════════════════════════════════════════════════
+PART 4 — WHAT "PREMIUM DESIGN" MEANS IN THIS PROJECT
+═══════════════════════════════════════════════════════════════════
+
+"Premium" is not a vibe. It is a set of enforceable principles
+drawn from four world-class design traditions, executed on
+top of shadcn/ui (Tailwind-recreated), with disciplined use
+of colour and rich data visualisation.
+
+───────────────────────────────────────────────────────────────────
+4.1 FOUNDATION — TAILWIND-ONLY, SHADCN-IDENTICAL
+───────────────────────────────────────────────────────────────────
+
+- CSS = Tailwind CSS exclusively. No separate CSS files with
+  bespoke rules. No alternative frameworks. No inline style
+  hacks beyond what Tailwind utilities cannot express.
+- You MAY (and must) perform robust modifications to the
+  Tailwind config and theme extension so that buttons,
+  cards, inputs, tabs, dialogs, dropdowns, sheets, tables,
+  badges, toasts, popovers, tooltips, and every other
+  primitive are VISUALLY INDISTINGUISHABLE from default
+  shadcn/ui — to the point an expert cannot tell them apart.
+- You have EXPLICIT PERMISSION to extend the shadcn palette
+  with controlled accent colour and character — see 4.6.
+  shadcn's geometric discipline, typographic rhythm,
+  spacing system, and component semantics MUST remain.
+
+───────────────────────────────────────────────────────────────────
+4.2 APPLE — CLARITY, DEFERENCE, DEPTH, CRAFT
+───────────────────────────────────────────────────────────────────
+
+1. CLARITY — every element has one purpose; hierarchy via
+   weight/size/spacing, not decoration.
+2. DEFERENCE — UI steps aside so the CASE / TRAVELLER / DATA
+   is the hero. Whisper-soft chrome.
+3. DEPTH — layering communicates hierarchy; motion has physics
+   (ease-out in, ease-in out).
+4. CRAFT AT THE PIXEL — 1px matters; optical balance beats
+   mathematical balance; no rough edges.
+
+───────────────────────────────────────────────────────────────────
+4.3 MICROSOFT FLUENT — LIGHT, DEPTH, MOTION, MATERIAL, SCALE
+───────────────────────────────────────────────────────────────────
+
+1. LIGHT — soft illumination; focus rings; subtle active glows.
+2. DEPTH — clear z-axis (base → card → elevated → modal →
+   toast); shadows scale with depth.
+3. MOTION — 150 ms micro / 250 ms standard / 400 ms max;
+   motion explains causality.
+4. MATERIAL — surfaces feel real; acrylic translucency only
+   on sticky headers and command bars.
+5. SCALE — built for density (tables, timelines, logs) without
+   ever feeling cramped.
+
+───────────────────────────────────────────────────────────────────
+4.4 GOOGLE MATERIAL — STRUCTURE, MEANING, DATA-VIZ, RESPONSIVE
+───────────────────────────────────────────────────────────────────
+
+1. MATERIAL AS METAPHOR — surfaces stack, move, respond.
+2. BOLD, GRAPHIC, INTENTIONAL — strong type hierarchy,
+   confident whitespace.
+3. MOTION PROVIDES MEANING — animations explain relationships.
+4. DATA VISUALISATION EXCELLENCE — every chart teaches:
+   clear axes, restrained palette, annotations, rich
+   tooltips. No chart is decoration.
+5. RESPONSIVE ADAPTATION — mobile is first-class, never a
+   shrunk desktop.
+
+───────────────────────────────────────────────────────────────────
+4.5 TESLA — REDUCTION, COMMAND, AMBIENT INTELLIGENCE, REAL-TIME
+───────────────────────────────────────────────────────────────────
+
+1. RUTHLESS REDUCTION — if an element does not serve the
+   next decision, it does not ship.
+2. COMMAND SURFACE — every screen answers: "What can I do
+   right now, and what is the system telling me?"
+3. AMBIENT INTELLIGENCE — the system anticipates; the right
+   action surfaces without the user hunting.
+4. MONOCHROMATIC CONFIDENCE WITH ACCENT — predominantly
+   neutral canvas; colour used SEMANTICALLY (risk, status,
+   progress), NEVER decoratively.
+5. REAL-TIME FEEL — counters tick, statuses update,
+   timestamps refresh; UI feels alive.
+
+───────────────────────────────────────────────────────────────────
+4.6 COLOUR — DISCIPLINED, RICH, NEVER LIFELESS
+───────────────────────────────────────────────────────────────────
+
+You are explicitly permitted — and REQUIRED — to inject
+lots of colour and character into every view, as long as
+every colour is SEMANTIC:
+
+- Neutral canvas: shadcn zinc/slate/neutral scale.
+- Risk accents:
+    LOW       → emerald/green family
+    MEDIUM    → amber/yellow family
+    HIGH      → orange family
+    CRITICAL  → red/rose family
+- Intelligence accents:
+    Suspected disease categories → distinct hue per category
+    IHR tier band                → disciplined gradient
+    Case progress stages         → sequential blue→violet→green
+    Aggregated-report categories → distinct per frequency
+- Data-viz palettes must be colour-blind-safe (Okabe-Ito
+  or viridis family) AND premium.
+- Gradients are allowed and encouraged on hero cards,
+  status banners, KPI tiles, progress rings, and chart
+  fills — Tesla-style. Never on body text.
+- No rainbow chaos. No random colour per button. Every
+  hue earns its place by communicating state.
+
+NEVER flat, grey, or lifeless. Every view must feel alive.
+
+───────────────────────────────────────────────────────────────────
+4.7 SYNTHESIS — WHAT PREMIUM LOOKS LIKE HERE
+───────────────────────────────────────────────────────────────────
+
+Apple gives us clarity and craft.
+Microsoft gives us depth, motion, and material.
+Google gives us structure, meaning, and data-viz rigour.
+Tesla gives us reduction, command, and ambient intelligence.
+
+On shadcn/ui, "premium" in this project means:
+- Neutral, confident canvas with disciplined accent colour
+- Typographic hierarchy that teaches without decoration
+- Rich, semantic colour that communicates state
+- Motion that explains, never distracts
+- Depth that guides the eye through the task
+- Every surface answering "What should I do next?"
+- Data visualised, not listed
+- Interactions anticipated, not reactive
+- Not one wasted pixel, not one dead button, not one
+  unexplained label
+
+This is the bar. Nothing below this ships.
+
+═══════════════════════════════════════════════════════════════════
+PART 5 — GLOBAL LAWS (PERMANENT, APPLY TO EVERY VIEW)
+═══════════════════════════════════════════════════════════════════
+
+LAW 1 — MOBILE-FIRST, ALWAYS
+   Every view is designed mobile-first (≥320 px baseline).
+   Upgraded at sm:, md:, lg:, xl:, 2xl:.
+   Never use anything not fully supported on mobile
+   browsers. Touch targets ≥ 40×40 px. Safe-area insets
+   honoured. Tested at 320/390/768/1024/1280/1536/1920 px.
+
+LAW 2 — USERS ARE DUMB AND NEED HELP
+   Design every view on the primary principle that the user
+   has NO IDEA what they are looking at. Users must never
+   need training to understand:
+     - what they are seeing
+     - what the page is for
+     - what the data means
+     - what their options are
+     - what action they should take
+     - what happens after they take it
+     - whether they succeeded
+   Assume users are lost, confused, unfamiliar, and need
+   help with even the smallest task, smallest interpretation,
+   smallest workflow decision, and smallest next step.
+
+LAW 3 — INSANELY SMART AI-HARDCODED WIZARDS EVERYWHERE
+   Every view — CRUD, alerts, notifications, reports,
+   settings, anything — behaves as a smart AI-hardcoded
+   wizard that tells the user:
+     - what this screen is
+     - what action to take
+     - where to take it
+     - what the options are
+     - what the consequence of each option is
+     - what the recommended path is
+     - how to finish correctly
+   The sophistication bar is the mobile app's
+   SecondaryScreening.vue — 4-step progress stepper,
+   progressive disclosure, auto-analysis, engine
+   suggestions with "Apply" buttons, override flows with
+   mandatory justifications, non-case auto-routing,
+   outbreak context, IHR risk banners, disease detail
+   modals with WHO case definitions. MATCH OR EXCEED THIS.
+
+LAW 4 — CLAUDE-AI-STYLE GUIDANCE TONE
+   The interface speaks to the user the way Claude AI does.
+   Example (illustrative only):
+     "Hey Timothy, this case has A, B, C. Here's what you
+      need to do next. What would you like to do?"
+   Every view guides, alerts, and keeps the user engaged.
+   Pull the user's first name from the auth session.
+
+LAW 5 — STATS + ANALYSIS ON EVERY VIEW
+   Every view carries meaningful stats and analysis.
+   Not optional. Not "where appropriate." EVERY view.
+   Even settings pages, even user profile pages, even
+   CRUD lists — something meaningful is counted,
+   compared, trended, or surfaced.
+
+LAW 6 — HEAVY VISUALISATION ON EVERY VIEW
+   Every view includes graphs, charts, sparklines,
+   progress rings, heatmaps, timelines, or other data
+   visualisations executed to Google Material data-viz
+   standards. Data must come alive. Recommended library
+   stack: ApexCharts or Chart.js (Laravel-friendly,
+   Tailwind-skinnable), plus CSS-only sparklines for
+   inline use. One library choice, applied consistently.
+
+LAW 7 — NEVER EXPOSE DATABASE ENUMS OR TIER LABELS
+   Do NOT say "Suspected Tier 1", "tier1_always_critical",
+   "IHR_T1", "VHF_PROTOCOL_ACTIVATED", or any raw DB enum
+   to the end user. Resolve enums to their human meaning.
+   Resolve suspected cases to the actual DISEASE CATEGORY
+   stored in the DB (e.g. "Suspected Viral Haemorrhagic
+   Fever — Ebola / Marburg / Lassa"). Use the
+   DiseaseIntel.php service as the translation layer.
+   Memorise this rule permanently.
+
+LAW 8 — SURFACE 100% OF CASE + TRAVELLER INTELLIGENCE
+   Every alert/case view must display the full intelligence
+   available in the database about:
+     - the suspected case (by disease category, not tier)
+     - the traveller (identity, journey, direction,
+       document, nationality, contact, destination)
+     - every field entered during secondary screening
+       (profile, symptoms with onset dates, vitals,
+       exposures with YES/NO/UNKNOWN, outbreak context,
+       IHR risk, differential ranking with confidence
+       bands, matched hallmarks, score breakdowns, WHO
+       case definitions, officer overrides, actions taken,
+       suspected diseases, disposition, follow-up plan)
+     - who is currently working on the case
+     - what has happened so far
+     - what has been delayed and why
+     - collaborators, comments, evidence, handoffs,
+       breaches, external responders, case sheet
+   Alert views must feel like an intelligent case brief —
+   never a log dump, never a vertical data list.
+
+LAW 9 — TAB-AND-WIZARD ORIENTED, NEVER VERTICAL LISTS
+   Views are structured around tabs, steppers, and wizards.
+   Vertical useless data lists are banned. Aggressively
+   code wizards — every link, every action, every decision
+   path is wizard-guided with a clear start and finish.
+
+LAW 10 — CLOSED-LOOP VIEW DESIGN
+   Every view has:
+     - a clear purpose (shown at the top)
+     - a clear explanation of what the screen is for
+     - a clear set of options
+     - a guided decision path
+     - a clear finish
+     - confirmation of what happened
+     - a safe next step
+   No view leaves the user wondering what to do.
+
+LAW 11 — EVERY FUNCTIONALITY MUST ACTUALLY WORK
+   Every link, every button, every form, every filter, every
+   action in every view must be WIRED TO LIVE BACKEND
+   FUNCTIONALITY. Tested. End-to-end. No placeholder
+   href="#". No dead buttons. No "coming soon." No UI that
+   looks polished but isn't wired. Example of the current
+   failure we are correcting: /admin/alerts/10 today is
+   a view with no working behaviour — UNACCEPTABLE.
+
+LAW 12 — RBAC LIVES IN LARAVEL, NOT IN VIEWS
+   RBAC enforcement lives in:
+     - route middleware (auth, role, scope)
+     - controller authorisation (Gate, Policy, authorize())
+     - form requests (authorize() method)
+     - policies (api/app/Policies/**)
+     - query scoping (global scopes, explicit where clauses
+       by poe_code / district_code / pheoc_code /
+       country_code pulled from user_assignments where
+       is_primary=1 AND is_active=1)
+   Views render whatever the controller gives them. Views
+   may conditionally show/hide UI CHROME based on
+   $user->can('…') or a view-model flag set by the
+   controller — but authorisation decisions are NEVER made
+   in Blade. If a view needs a capability check, the
+   controller computes it and passes it in.
+
+LAW 13 — PUBLIC-HEALTH LANGUAGE, BASIC FOR ANYONE
+   Every label, tooltip, helper text, empty state, and
+   error message uses plain public-health language. No DB
+   field names. No enums. No internal codes. No Laravel
+   exception text. No health-surveillance jargon.
+
+LAW 14 — LOADING, EMPTY, ERROR, AND SUCCESS STATES
+   Every view designs all four states deliberately:
+     - LOADING — skeletons that match the final layout,
+       not blank spinners.
+     - EMPTY — illustrated, explain why it's empty,
+       suggest the next action.
+     - ERROR — calm, specific, actionable; never a raw
+       stack trace.
+     - SUCCESS — confirmation, what happened, what's next.
+
+LAW 15 — ACCESSIBILITY IS NON-NEGOTIABLE
+   WCAG 2.1 AA minimum:
+     - Colour contrast 4.5:1 body / 3:1 large.
+     - Every interactive element is keyboard reachable
+       and focus-visible.
+     - ARIA roles, labels, and live regions where
+       appropriate (aria-live="polite" for guidance,
+       "assertive" for critical flags).
+     - prefers-reduced-motion honoured.
+     - Icons paired with text labels.
+
+LAW 16 — PERFORMANCE BUDGET
+   - First meaningful paint < 1.5 s on 4G.
+   - Chart libraries lazy-loaded per view that needs them.
+   - Livewire polling intervals justified (15 s for
+     cockpit, 30 s for hubs, on-demand elsewhere).
+   - No N+1 queries (view models pre-compute everything).
+
+═══════════════════════════════════════════════════════════════════
+PART 6 — MANDATORY COMPONENT KIT (BUILD ONCE, REUSE EVERYWHERE)
+═══════════════════════════════════════════════════════════════════
+
+Before building any module-specific view, deliver a Blade
+anonymous-component library at
+api/resources/views/components/ui/** that covers:
+
+LAYOUT & SHELL
+- <x-ui.page heading="…" subheading="…" :breadcrumbs="…">
+- <x-ui.section> <x-ui.section-header>
+- <x-ui.toolbar> (filters, search, view toggles)
+- <x-ui.split> (main + aside composition)
+
+NAVIGATION
+- <x-ui.tabs> / <x-ui.tab> (URL-synced via Alpine + history)
+- <x-ui.stepper :steps="…" :current="…">
+- <x-ui.breadcrumbs>
+- <x-ui.sub-nav>
+
+DATA DISPLAY
+- <x-ui.kpi :label :value :delta :trend :icon :tone>
+- <x-ui.stat-grid> (responsive 2/3/4/6 columns)
+- <x-ui.data-table> (sortable, filterable, paginated,
+  responsive — stacks to cards under sm:)
+- <x-ui.definition-list> (for case facts)
+- <x-ui.timeline> (events, audit trail, case history)
+- <x-ui.kanban-column> / <x-ui.kanban-card>
+- <x-ui.empty :title :body :illustration :cta>
+- <x-ui.skeleton-*> (row, card, chart, kpi)
+
+STATUS & FEEDBACK
+- <x-ui.badge :tone> (neutral, low, medium, high, critical,
+  info, success, warning, danger)
+- <x-ui.risk-chip :level>
+- <x-ui.priority-pill :priority>
+- <x-ui.status-dot :state>
+- <x-ui.progress-ring :value :label :tone>
+- <x-ui.progress-bar :value :tone>
+- <x-ui.toast> (Alpine-driven)
+- <x-ui.banner :tone :icon :title> (non-blocking advisories)
+- <x-ui.alert-banner :tone="critical"> (blocking)
+
+FORMS (every form control built once, skinned shadcn-perfect)
+- <x-ui.input> <x-ui.textarea> <x-ui.select> <x-ui.multi-select>
+- <x-ui.date> <x-ui.datetime> <x-ui.date-range>
+- <x-ui.switch> <x-ui.checkbox> <x-ui.radio-group>
+- <x-ui.chip-group> (single/multi, like mobile app)
+- <x-ui.segmented> (like mobile gender picker)
+- <x-ui.tri-state> (YES / NO / UNKNOWN — mobile exposure pattern)
+- <x-ui.file-dropzone>
+- <x-ui.field :label :help :error :required>
+- <x-ui.form-wizard> (multi-step with Alpine state, validation
+  per step, server persistence per step — mirror the mobile
+  app's Step 1/2/3/4 save pattern)
+
+OVERLAYS
+- <x-ui.dialog> / <x-ui.sheet> (side drawer)
+- <x-ui.popover> <x-ui.tooltip>
+- <x-ui.command-palette> (⌘K — already in layout)
+- <x-ui.confirm-action> (dangerous actions; mandatory
+  justification textarea when needed)
+
+DATA-VIZ WRAPPERS
+- <x-ui.chart :type="line|area|bar|column|donut|radial|heatmap|sankey">
+  — single wrapper around the chosen chart library, enforces
+  the premium theme, colour-blind palette, tooltip style.
+- <x-ui.sparkline :series :tone>
+- <x-ui.gauge :value :thresholds>
+- <x-ui.map> (MapLibre — only where geography matters)
+
+DOMAIN-SPECIFIC (PHEOC)
+- <x-ui.disease-chip :disease_code>
+  (renders the resolved disease category, tone-mapped by
+  WHO IHR tier, with hover-card showing case definition
+  pulled from DiseaseIntel)
+- <x-ui.case-hero :alert :traveller> (top-of-page case summary)
+- <x-ui.case-brief :secondary_screening>
+  (full secondary-screening read-through — profile,
+  symptoms, vitals, exposures, analysis — NEVER missing
+  a field captured on the phone)
+- <x-ui.ihr-banner :ihr_risk>
+- <x-ui.717-ring :indicator :minutes_elapsed :target>
+- <x-ui.copilot-card :brief :actions>
+  (Claude-AI-style guidance block — used on every view
+  to greet, explain, and propose next steps)
+- <x-ui.who-definition :disease_code> (suspected/probable/
+  confirmed + POE action)
+
+Every component must be:
+- Tailwind-only, shadcn-identical
+- Mobile-first
+- Dark-mode aware (Laravel dashboard keeps light default;
+  dark mode ships in the same pass, toggled via the
+  existing body-level Alpine state)
+- Accessible (keyboard, ARIA, focus-visible)
+- Documented with a short usage example in its file header
+
+═══════════════════════════════════════════════════════════════════
+PART 7 — MOTHER LAYOUT STANDARD
+═══════════════════════════════════════════════════════════════════
+
+Rebuild api/resources/views/admin/layout.blade.php and its
+partials to meet every law above. Required behaviour:
+
+SIDEBAR (DESKTOP RAIL + MOBILE DRAWER)
+- Decongested, disciplined grouping (Operations,
+  Intelligence, Communications, Administration).
+- Every label uses plain public-health language. No raw
+  route names. No dev-speak.
+- RBAC visibility is controller-computed and passed into
+  the layout as a menu view-model. Blade only renders.
+- Collapsible to an icon rail on desktop; full drawer on
+  mobile (< lg).
+- Badge counts (inbox unread, stuck alerts, overdue
+  follow-ups) pulled from a view composer or Livewire
+  poll every 30 s.
+- Sticky brand at top, scrolling menu in middle, sticky
+  user chip at bottom — only the middle scrolls.
+
+TOPBAR
+- Hamburger (mobile) · Breadcrumbs · Command-palette
+  launcher · Status chips (env, country, DB health) ·
+  Copilot toggle · Inbox bell · User menu.
+- Status chips collapse to icons under xl:.
+- Real-time: tick, update, refresh — Tesla feel.
+
+COMMAND PALETTE (⌘K)
+- Fuzzy search across nav, shortcuts, recent cases,
+  recent alerts, users.
+- Keyboard-first (↑↓, ↵, Esc, number shortcuts).
+
+PHEOC COPILOT DOCK (⌘J)
+- Claude-AI-style greeting personalised with user's
+  first name and current scope.
+- Shows: today's national brief, the N most important
+  actions, deterministic recommendations from
+  App\Services\PheocCopilot.
+- Present on every page, context-aware.
+
+FOOTER (MOBILE)
+- 5-slot bottom tab bar under md: (Dashboard · Alerts ·
+  Cases · Inbox · More). Desktop hides it.
+
+KEYBOARD SHORTCUTS
+- ⌘K / Ctrl+K → command palette
+- ⌘J / Ctrl+J → Copilot dock
+- ⌘/ → keyboard shortcut help
+- Esc → close any overlay
+
+═══════════════════════════════════════════════════════════════════
+PART 8 — PER-VIEW BLUEPRINT (APPLIES TO EVERY VIEW)
+═══════════════════════════════════════════════════════════════════
+
+Every view — without exception — ships with these sections,
+in this order, using the component kit:
+
+1. COPILOT CARD (<x-ui.copilot-card>)
+   Claude-AI greeting + situational brief + 2–4 suggested
+   next actions with reasoning.
+
+2. STATS ROW (<x-ui.stat-grid> of <x-ui.kpi>)
+   3–6 KPIs relevant to the view, with trend sparklines
+   and deltas.
+
+3. VISUALISATION BLOCK (1–3 <x-ui.chart>)
+   The chart(s) most useful for comprehension at this
+   level. Every chart explained by a short caption and a
+   tooltip glossary.
+
+4. PRIMARY WORK SURFACE
+   Depending on the view:
+     - Kanban (alerts hub)
+     - Data table with filters & saved views (lists)
+     - Stepper / wizard (create/edit flows)
+     - Case brief + tabs (case/alert detail)
+     - Template builder (aggregated wizard)
+     - Timeline + panels (war-room)
+
+5. CONTEXTUAL GUIDANCE PANEL
+   Inline helper text, decision trees, "what happens
+   next" explainers — wizard voice throughout.
+
+6. FOOTER ACTION BAR
+   Sticky on mobile. Primary action(s) with consequence
+   preview ("This will notify the PHEOC and close the
+   case"). Destructive actions behind confirm with
+   mandatory justification where relevant.
+
+NO VIEW SHIPS WITHOUT ALL SIX SECTIONS.
+
+═══════════════════════════════════════════════════════════════════
+PART 9 — PHASED EXECUTION PLAN
+═══════════════════════════════════════════════════════════════════
+
+PHASE 0 — CONTINUITY LOCK (see Part 1). OUTPUT ONLY.
+
+PHASE 1 — STUDY + AUDIT + CATALOGUE
+   Deliverable 1A: Proof of study.
+     - List of every controller read.
+     - List of every model/service/middleware/policy read.
+     - Summary of the 7 MVP modules per DEVELOPERS §17.
+     - Summary of every live route under /admin/**.
+     - Confirmation the mobile-app reference views were
+       read and understood.
+   Deliverable 1B: Structured catalogue of every admin
+     view that CURRENTLY exists under
+     api/resources/views/**, in this tabular format:
+       View path · Route · Controller + method ·
+       Purpose (plain PH language) · Current failures
+       (clutter/oversized/leakage/no-RBAC/non-mobile/
+        enum-exposure/dead-wiring) · Target module (M1–M7)
+       · Target pattern (cockpit / hub / wizard / detail
+       / table / builder / brief) · Secondary-screening
+       data dependencies · Live endpoints to wire ·
+       Every interactive element required ·
+       Proposed refactor phase (P1–P6).
+   Deliverable 1C: Target Information Architecture —
+     the final sitemap of the admin panel mapped to the
+     7 MVP modules and the 5 artefacts (DEVELOPERS §17.1).
+   Deliverable 1D: Gap list — any controller/endpoint
+     required by a target view but missing, flagged with
+     one-line rationale (I will decide whether to add).
+   Deliverable 1E: Phase plan for Phases P2 → P6.
+
+   STOP AFTER PHASE 1. WAIT FOR MY APPROVAL.
+
+PHASE P2 — TAILWIND/SHADCN FOUNDATION
+   - Re-engineer tailwind.config.js: colour tokens,
+     radii, shadows, type scale, spacing, ring, zinc
+     neutral palette, semantic tone tokens (low/medium/
+     high/critical/info/success), chart palette.
+   - Ship the component kit described in Part 6.
+   - Ship the upgraded mother layout per Part 7.
+   - Ship Storybook-style demo route (/admin/_kit) that
+     renders every component in every state.
+   - STOP. I review. I approve.
+
+PHASE P3 — M1 COMMAND OVERVIEW + M2 ALERT LIFECYCLE
+   Priority: ALERT LIFECYCLE is the product.
+   - One view per sub-phase: Alerts Hub → Alert Detail /
+     War Room → 7-1-7 Board → Alert History.
+   - Each view: complete it fully per Part 8, wire it
+     live per Law 11, then STOP and show me.
+
+PHASE P4 — M3 CASES & SCREENING + M4 INTELLIGENCE
+   - Case register, case detail (full secondary-screening
+     read-through at mobile-app parity), primary
+     throughput, intelligence tripwires, 72 h brief.
+   - One view per sub-phase.
+
+PHASE P5 — M5 COMMUNICATIONS + M6 AGGREGATED REPORTS
+   - Inbox, Outbound (log + templates + digests +
+     suppressions), Responders, Public token portal.
+   - Aggregated Hub, Submission Wizard, Admin Wizard,
+     Template Admin, National Rollup.
+   - One view per sub-phase.
+
+PHASE P6 — M7 ADMINISTRATION
+   - Users, Assignments, Audit, System Health, Geography,
+     Settings.
+   - Last because a PHEOC director does not touch these
+     during an outbreak.
+
+EXECUTION RULE (APPLIES TO EVERY PHASE P2 → P6):
+   - One view at a time.
+   - Complete fully (design + every component +
+     functionality + stats + visualisations + wizard +
+     copy + RBAC hooks + live wiring + polish) before
+     moving on.
+   - After each view, STOP, show me, wait for approval.
+   - Only after ALL views in a phase are complete do
+     we advance to the next phase.
+   - Do NOT batch-code. Do NOT "just code."
+   - Design, wire, test, polish, then move.
+
+═══════════════════════════════════════════════════════════════════
+PART 10 — NON-NEGOTIABLES RECAP
+═══════════════════════════════════════════════════════════════════
+
+- No hallucinations. No inventing routes, controllers,
+  columns, enums, or workflows.
+- No loss of context. Phase 0 checkpoint preserved.
+- No copying, imitating, or salvaging existing Blade views.
+- No RBAC in Blade. RBAC lives in middleware, routes,
+  controllers, policies, form requests, and query scopes.
+- No exposing database enums, tier labels, or raw codes
+  to the user. Translate via DiseaseIntel / human copy.
+- No desktop-first assumptions.
+- No dead buttons, dead links, dead forms.
+- No vertical useless data lists. Wizards and tabs.
+- No shallow beautification. Premium means rich,
+  wizard-guided, data-dense, intelligently coloured,
+  and genuinely helpful.
+- No silent failures. Every form reports what happened.
+- No training-dependent UI. The user, dumb and confused,
+  completes their objective without help.
+- No rainbow chaos. Colour is semantic.
+
+═══════════════════════════════════════════════════════════════════
+PART 11 — OUTPUT EXPECTATIONS RIGHT NOW
+═══════════════════════════════════════════════════════════════════
+
+In your very next response, deliver ONLY the following,
+in this exact order:
+
+1. PHASE 0 CHECKPOINT
+   Where you stopped, what phase, what's done, what's
+   next, what this interrupts. State it explicitly.
+
+2. CONFIRMATION OF INTERNALISATION
+   A crisp bulleted acknowledgement that you have
+   internalised, and will enforce:
+     - The 7 MVP modules (DEVELOPERS §17.1)
+     - The premium design philosophy (Apple + Microsoft +
+       Google + Tesla, executed on shadcn-in-Tailwind)
+     - Disciplined rich colour per 4.6
+     - All 16 Global Laws in Part 5
+     - The Mandatory Component Kit in Part 6
+     - The Mother Layout Standard in Part 7
+     - The Per-View Blueprint in Part 8
+     - RBAC stays in Laravel, never in Blade
+     - Never expose tier enums; resolve to disease category
+     - Every view carries stats + visualisations +
+       disciplined colour + character + wizard guidance
+     - Every case/alert view surfaces 100% of secondary-
+       screening data at mobile-app parity
+     - Alerts show 100% case + traveller intelligence
+     - Existing Blade views are trash and will not be
+       copied or imitated
+     - The mobile-app views are the sophistication
+       benchmark — match or exceed
+
+3. PHASE 1 PLAN
+   How you will conduct the study + audit + catalogue
+   described in Part 9, including exactly which files
+   you will open (by path), in what order.
+
+4. NOTHING ELSE.
+   Do NOT produce the catalogue itself yet.
+   Do NOT start Phase 2.
+   Do NOT write any Blade, Tailwind config, or component.
+   Wait for my explicit approval of your Phase 1 plan
+   before you open a single file.
+
+═══════════════════════════════════════════════════════════════════
+END OF DIRECTIVE
+═══════════════════════════════════════════════════════════════════

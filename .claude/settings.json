@@ -3,7 +3,34 @@
     "allow": [
       "Bash(mysql -u hacker -pkamukama poe_2026 -e ' *)",
       "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(f'Templates: {len\\(d[\\\\\"data\\\\\"]\\)}'\\); [print\\(f'  #{t[\\\\\"id\\\\\"]} {t[\\\\\"template_code\\\\\"]} · {t[\\\\\"reporting_frequency\\\\\"]} · status={t[\\\\\"status\\\\\"]} · cols={len\\([c for c in t.get\\(\\\\\"columns\\\\\",[]\\) if c[\\\\\"is_enabled\\\\\"]]\\)}/{ len\\(t.get\\(\\\\\"columns\\\\\",[]\\)\\) } · locked={t[\\\\\"locked\\\\\"]}'\\) for t in d['data']]\")",
-      "Bash(php -l /home/hacker/ecsa_poe_2026/api/app/Http/Controllers/AggregatedController.php)"
+      "Bash(php -l /home/hacker/ecsa_poe_2026/api/app/Http/Controllers/AggregatedController.php)",
+      "Bash(grep -n 'Alert created\\\\|insertGetId\\\\|insertGetId.*alerts\\\\|Alert closed\\\\|update.*where.*id.*$id' /home/hacker/ecsa_poe_2026/api/app/Http/Controllers/AlertsController.php)",
+      "Bash(php -l /home/hacker/ecsa_poe_2026/api/app/Services/NotificationDispatcher.php)",
+      "Bash(php -l /home/hacker/ecsa_poe_2026/api/app/Http/Controllers/AlertsController.php)",
+      "Bash(php -l /home/hacker/ecsa_poe_2026/api/app/Http/Controllers/PrimaryScreeningController.php)",
+      "Bash(grep -E \"1387|userId.*=.*int|userId.*=.*\\\\\\\\\\\\$\")",
+      "Bash(awk 'NR>=1387 && NR<=1410 && /\\\\$userId/' /home/hacker/ecsa_poe_2026/api/app/Http/Controllers/SecondaryScreeningController.php)",
+      "Bash(php -l /home/hacker/ecsa_poe_2026/api/app/Http/Controllers/SecondaryScreeningController.php)",
+      "Bash(php -l /home/hacker/ecsa_poe_2026/api/app/Services/IntelligenceEngine.php)",
+      "Bash(mysql -u hacker -pkamukama poe_2026 -e \"SELECT template_code, LEFT\\(body_html_template, 200\\) AS html_head FROM notification_templates WHERE template_code='ALERT_HIGH';\")",
+      "Bash(mysql -u hacker -pkamukama poe_2026 -e \"SHOW COLUMNS FROM notification_templates;\")",
+      "Bash(mysql -u hacker -pkamukama poe_2026 -N -e \"SELECT template_code, CHAR_LENGTH\\(COALESCE\\(body_text_template,''\\)\\) AS text_len FROM notification_templates WHERE channel='EMAIL' ORDER BY template_code;\")",
+      "Bash(php -l app/Services/NotificationDispatcher.php)",
+      "Bash(mysql -u hacker -pkamukama poe_2026 -N -e \"SELECT id, alert_code, country_code, risk_level, routed_to_level FROM alerts ORDER BY id DESC LIMIT 3;\")",
+      "Bash(mysql -u hacker -pkamukama poe_2026 -e \"DELETE FROM notification_suppressions WHERE related_entity_id=11 AND related_entity_type='ALERT';\")",
+      "Bash(mysql -u hacker -pkamukama poe_2026 -e \"SHOW TABLES;\")",
+      "Bash(mysql -u hacker -pkamukama poe_2026 -e 'SHOW COLUMNS FROM __TRACKED_VAR__;')",
+      "Bash(php -l app/Support/DiseaseIntel.php)",
+      "Bash(php -l app/Services/CaseContextBuilder.php)",
+      "Bash(php -l database/seeders/AggressiveTemplates/AlertTemplates.php)",
+      "Bash(php -l database/seeders/AggressiveTemplates/FollowupTemplates.php)",
+      "Bash(php -l database/seeders/AggressiveTemplates/ReportTemplates.php)",
+      "Bash(php -l database/seeders/AggressiveEmailTemplatesSeeder.php)",
+      "Bash(mysql -u hacker -pkamukama poe_2026 -N -e \"SELECT template_code, CHAR_LENGTH\\(body_html_template\\) AS html, CHAR_LENGTH\\(body_text_template\\) AS txt FROM notification_templates WHERE channel='EMAIL' ORDER BY template_code;\")",
+      "Bash(php -l app/Console/Commands/NotificationsDemoAll.php)",
+      "Bash(mysql -u hacker -pkamukama poe_2026 -N -e \"SELECT id, username, full_name FROM users WHERE is_active=1 ORDER BY id LIMIT 5;\")",
+      "Bash(mysql -u hacker -pkamukama poe_2026 -e \"SHOW COLUMNS FROM notifications;\")",
+      "Bash(mysql -u hacker -pkamukama poe_2026 -N -e ' *)"
     ]
   }
 }

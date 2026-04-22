@@ -72,7 +72,7 @@ final class UserController extends Controller
     // ----------------------------------------------------------------
 
     /** All valid values for users.role_key VARCHAR(60). */
-    private const VALID_ROLES = [
+    public const VALID_ROLES = [
         'NATIONAL_ADMIN',
         'PHEOC_OFFICER',
         'DISTRICT_SUPERVISOR',
@@ -96,7 +96,7 @@ final class UserController extends Controller
      * Valid values for user_assignments.province_code and pheoc_code.
      * Source: POES.JS → administrative_groups[].admin_level_1 where country = "Uganda".
      */
-    private const VALID_PHEOC_NAMES = [
+    public const VALID_PHEOC_NAMES = [
         'Arua RPHEOC',
         'Fort Portal RPHEOC',
         'Gulu RPHEOC',
@@ -113,7 +113,7 @@ final class UserController extends Controller
      * Valid values for user_assignments.district_code.
      * Source: POES.JS → administrative_groups[].districts (all Uganda entries, flattened).
      */
-    private const VALID_DISTRICT_NAMES = [
+    public const VALID_DISTRICT_NAMES = [
         // Arua RPHEOC
         'Koboko District',
         'Moyo District',
@@ -158,7 +158,7 @@ final class UserController extends Controller
      * Source: POES.JS → poes[].poe_name where country = "Uganda".
      * These are the exact name strings — not IDs, not codes.
      */
-    private const VALID_POE_NAMES = [
+    public const VALID_POE_NAMES = [
         // Gulu RPHEOC — Amuru District
         'Elegu / Atiak',
         // Gulu RPHEOC — Lamwo District
@@ -236,7 +236,7 @@ final class UserController extends Controller
      * Minimum user_assignments geography required per role.
      * Drives enforceGeographyForRole() validation.
      */
-    private const ROLE_GEO_REQUIREMENTS = [
+    public const ROLE_GEO_REQUIREMENTS = [
         'NATIONAL_ADMIN'      => [],
         'PHEOC_OFFICER'       => ['province_or_pheoc'],
         'DISTRICT_SUPERVISOR' => ['province_or_pheoc', 'district_code'],

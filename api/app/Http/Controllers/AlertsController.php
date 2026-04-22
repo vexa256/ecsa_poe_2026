@@ -50,6 +50,23 @@ final class AlertsController extends Controller
     private const VALID_GENERATED_FROM = ['RULE_BASED', 'OFFICER'];
     private const VALID_PLATFORMS      = ['ANDROID', 'IOS', 'WEB'];
 
+    /**
+     * Canonical close categories. Every user-visible close path must map to
+     * exactly one of these — they drive the War Room close dropdown, the
+     * ALERT_CLOSED email body, and the 7-1-7 compliance report.
+     *
+     * DUPLICATE requires merged_into_alert_id. OTHER requires a close_note.
+     */
+    public const CLOSE_CATEGORIES = [
+        'RESOLVED'                  => 'Case resolved through response',
+        'FALSE_POSITIVE'            => 'Alert generated in error / not a case',
+        'DUPLICATE'                 => 'Duplicate — merged into another alert',
+        'LOST_TO_FOLLOWUP'          => 'Traveller lost to follow-up',
+        'TRANSFERRED_OUT_OF_COUNTRY'=> 'Transferred out of country',
+        'DECEASED'                  => 'Traveller deceased',
+        'OTHER'                     => 'Other (explain in note)',
+    ];
+
     /** Roles that may acknowledge/close at each routing level. */
     private const ACKNOWLEDGE_ROLES = [
         'DISTRICT' => ['DISTRICT_SUPERVISOR', 'PHEOC_OFFICER', 'NATIONAL_ADMIN'],
@@ -68,7 +85,7 @@ final class AlertsController extends Controller
 
     public function index(Request $request): JsonResponse
     {
-        $userId = (int) $request->query('user_id', 0);
+        $userId = (int) ($request->user()?->id ?? $request->query('user_id', 0));
         if ($userId <= 0) {
             return $this->err(422, 'user_id query parameter is required.', [
                 'hint' => 'Append ?user_id={AUTH_DATA.id}',
@@ -169,6 +186,33 @@ final class AlertsController extends Controller
                 ->take($perPage)
                 ->get();
 
+            // Attach the top-ranked suspected-disease code per alert. This is
+            // the authoritative per-case signal from the scoring engine —
+            // populated in secondary_suspected_diseases with rank_order=1.
+            // Surfacing it lets the UI render "Suspected <disease name>"
+            // without falling back to engine jargon like TIER1_ALWAYS_CRITICAL.
+            $secIds = $alerts->pluck('secondary_screening_id')->filter()->unique()->values();
+            $topDiseaseByScreening = [];
+            if ($secIds->count() > 0) {
+                $topRows = DB::table('secondary_suspected_diseases')
+                    ->whereIn('secondary_screening_id', $secIds)
+                    ->where('rank_order', 1)
+                    ->select('secondary_screening_id','disease_code','confidence')
+                    ->get();
+                foreach ($topRows as $r) {
+                    $topDiseaseByScreening[(int) $r->secondary_screening_id] = [
+                        'disease_code' => (string) $r->disease_code,
+                        'confidence'   => $r->confidence !== null ? (float) $r->confidence : null,
+                    ];
+                }
+            }
+            foreach ($alerts as $a) {
+                $sid = $a->secondary_screening_id ? (int) $a->secondary_screening_id : null;
+                $top = $sid && isset($topDiseaseByScreening[$sid]) ? $topDiseaseByScreening[$sid] : null;
+                $a->top_disease_code       = $top['disease_code'] ?? null;
+                $a->top_disease_confidence = $top['confidence']   ?? null;
+            }
+
             // Summary counts by status for the dashboard pill strip
             $statusCounts = DB::table('alerts')
                 ->select('status', DB::raw('COUNT(*) as cnt'))
@@ -204,7 +248,7 @@ final class AlertsController extends Controller
 
     public function summary(Request $request): JsonResponse
     {
-        $userId = (int) $request->query('user_id', 0);
+        $userId = (int) ($request->user()?->id ?? $request->query('user_id', 0));
         if ($userId <= 0) {
             return $this->err(422, 'user_id query parameter is required.');
         }
@@ -256,7 +300,7 @@ final class AlertsController extends Controller
 
     public function show(Request $request, int $id): JsonResponse
     {
-        $userId = (int) $request->query('user_id', 0);
+        $userId = (int) ($request->user()?->id ?? $request->query('user_id', 0));
         if ($userId <= 0) {
             return $this->err(422, 'user_id query parameter is required.');
         }
@@ -431,10 +475,26 @@ final class AlertsController extends Controller
                 'secondary_id' => $secId,
             ]);
 
+            // Auto-seed the 14 RTSL early response actions against this alert
+            // so the response checklist is ready the moment operators open
+            // the case file. Idempotent — safe to re-call.
+            $seedResult = \App\Services\NotificationDispatcher::seedRtsl14Followups($newAlert, $userId);
+            Log::info('[Alerts][store] RTSL 14 seeded', $seedResult);
+
+            // Fire-and-forget email notification to the IHR escalation ladder.
+            // Catches all exceptions — failed emails never fail the alert create.
+            $dispatch = \App\Services\NotificationDispatcher::dispatchAlertCreated($newAlert, $userId);
+            Log::info('[Alerts][store] Notification dispatched', $dispatch);
+
             return $this->ok(
                 $this->formatAlert($newAlert),
                 'Alert created successfully.',
-                ['server_id' => $alertId, 'idempotent' => false]
+                [
+                    'server_id'    => $alertId,
+                    'idempotent'   => false,
+                    'notification' => $dispatch,
+                    'rtsl_seeded'  => $seedResult,
+                ]
             );
         } catch (Throwable $e) {
             return $this->serverError($e, 'alerts store');
@@ -455,7 +515,7 @@ final class AlertsController extends Controller
 
     public function acknowledge(Request $request, int $id): JsonResponse
     {
-        $userId = (int) $request->input('user_id', 0);
+        $userId = (int) ($request->user()?->id ?? $request->input('user_id', 0));
         if ($userId <= 0) {
             return $this->err(422, 'user_id is required in request body.');
         }
@@ -552,38 +612,58 @@ final class AlertsController extends Controller
 
     public function close(Request $request, int $id): JsonResponse
     {
-        $userId = (int) $request->input('user_id', 0);
-        if ($userId <= 0) {
-            return $this->err(422, 'user_id is required.');
-        }
+        // Actor — accept either sanctum user or legacy user_id query param
+        $userId = (int) ($request->user()?->id ?? $request->input('user_id', 0));
+        if ($userId <= 0) return $this->err(422, 'user_id is required.');
 
         $user = $this->resolveUser($userId);
-        if (! $user) {
-            return $this->err(404, 'User not found.');
-        }
+        if (! $user) return $this->err(404, 'User not found.');
 
         $assignment = $this->resolvePrimaryAssignment($userId);
-        if (! $assignment) {
-            return $this->err(403, 'No active assignment.');
-        }
+        if (! $assignment) return $this->err(403, 'No active assignment.');
 
-        $closeReason = trim((string) $request->input('close_reason', ''));
-        if (strlen($closeReason) < 5) {
-            return $this->err(422, 'close_reason is required (minimum 5 characters) when closing an alert.', [
-                'hint' => 'Explain why the alert is being closed: response completed, duplicate, or generated in error.',
+        $closeCategory = strtoupper(trim((string) $request->input('close_category', '')));
+        $closeNote     = trim((string) $request->input('close_note', ''));
+        $mergedInto    = $request->input('merged_into_alert_id');
+        // Legacy contract (mobile): accept a plain close_reason. When the
+        // admin UI sends close_category, we use it; otherwise fall back.
+        $legacyReason  = trim((string) $request->input('close_reason', ''));
+
+        if ($closeCategory === '' && $legacyReason !== '') {
+            // Legacy path — leave category null, treat reason as note.
+            $closeNote = $closeNote !== '' ? $closeNote : $legacyReason;
+        }
+        if ($closeCategory !== '' && ! array_key_exists($closeCategory, self::CLOSE_CATEGORIES)) {
+            return $this->err(422, 'Invalid close_category.', [
+                'allowed' => array_keys(self::CLOSE_CATEGORIES),
+            ]);
+        }
+        if ($closeCategory === 'DUPLICATE') {
+            $mergedInto = (int) $mergedInto;
+            if ($mergedInto <= 0 || $mergedInto === $id) {
+                return $this->err(422, 'merged_into_alert_id is required for DUPLICATE close_category.', [
+                    'hint' => 'Reference the canonical alert this one duplicates.',
+                ]);
+            }
+        } else {
+            $mergedInto = null;
+        }
+        if ($closeCategory === 'OTHER' && strlen($closeNote) < 10) {
+            return $this->err(422, 'close_note (≥10 chars) is required when close_category=OTHER.');
+        }
+        if ($closeCategory === '' && strlen($closeNote) < 5) {
+            return $this->err(422, 'Either close_category or a ≥5-char close_note/close_reason is required.', [
+                'hint' => 'Provide close_category + optional note, or a free-text reason.',
+                'allowed_categories' => array_keys(self::CLOSE_CATEGORIES),
             ]);
         }
 
         try {
             $alert = DB::table('alerts')->where('id', $id)->whereNull('deleted_at')->first();
-            if (! $alert) {
-                return $this->err(404, 'Alert not found.', ['id' => $id]);
-            }
+            if (! $alert) return $this->err(404, 'Alert not found.', ['id' => $id]);
 
             $scopeErr = $this->checkScope($alert, $assignment, $user);
-            if ($scopeErr) {
-                return $scopeErr;
-            }
+            if ($scopeErr) return $scopeErr;
 
             if ($alert->status === 'CLOSED') {
                 return $this->ok($this->formatAlert($alert), 'Alert already closed (idempotent).', [
@@ -591,7 +671,7 @@ final class AlertsController extends Controller
                 ]);
             }
 
-            // Role authorisation for close
+            // Role authorisation
             $routedTo     = $alert->routed_to_level;
             $allowedRoles = self::ACKNOWLEDGE_ROLES[$routedTo] ?? [];
             $userRole     = $user->role_key ?? '';
@@ -602,50 +682,114 @@ final class AlertsController extends Controller
                 ]);
             }
 
-            $now = now()->format('Y-m-d H:i:s');
-
-            // Auto-acknowledge if closing from OPEN (direct close — skipping ACK)
-            $ackAt = $alert->acknowledged_at;
-            $ackBy = $alert->acknowledged_by_user_id;
-            if ($alert->status === 'OPEN') {
-                $ackAt = $now;
-                $ackBy = $userId;
-                Log::info('[Alerts][close] Direct close from OPEN — auto-acknowledging', [
-                    'alert_id' => $id,
-                    'by_user'  => $userId,
+            // BLOCKS_CLOSURE — enforce that no incomplete follow-up marked
+            // blocks_closure=1 remains before we permit close. This is the
+            // hard constraint dashboard.txt §M2 calls out.
+            $blockers = DB::table('alert_followups')
+                ->where('alert_id', $id)
+                ->where('blocks_closure', 1)
+                ->whereNotIn('status', ['COMPLETED','NOT_APPLICABLE'])
+                ->whereNull('deleted_at')
+                ->select('id','action_code','action_label','status','due_at','assigned_to_role')
+                ->get();
+            if ($blockers->count() > 0) {
+                return $this->err(409, 'Cannot close — ' . $blockers->count() . ' blocking follow-up(s) are still open.', [
+                    'code'     => 'BLOCKS_CLOSURE',
+                    'blockers' => $blockers,
+                    'hint'     => 'Mark each blocking follow-up as COMPLETED or NOT_APPLICABLE before closing.',
                 ]);
             }
 
-            $updatedDetails = $alert->alert_details
-                ? $alert->alert_details . "\n[CLOSED: {$closeReason}]"
-                : "[CLOSED: {$closeReason}]";
+            $now = now()->format('Y-m-d H:i:s');
+
+            // Auto-ack on direct close from OPEN
+            $ackAt = $alert->acknowledged_at;
+            $ackBy = $alert->acknowledged_by_user_id;
+            if ($alert->status === 'OPEN') { $ackAt = $now; $ackBy = $userId; }
+
+            // Compact technical summary — stays in timeline_events.payload_json
+            // and in the email body, but is NOT appended into alert_details.
+            // The alert_details column is the original detection record and
+            // must remain immutable after creation; close metadata lives in
+            // close_category / close_note / merged_into_alert_id.
+            $summary = $closeCategory !== ''
+                ? "[CLOSED/{$closeCategory}]" . ($closeNote !== '' ? " {$closeNote}" : '')
+                : "[CLOSED: {$closeNote}]";
 
             DB::table('alerts')->where('id', $id)->update([
                 'status'                  => 'CLOSED',
                 'closed_at'               => $now,
+                'close_category'          => $closeCategory !== '' ? $closeCategory : null,
+                'close_note'              => $closeNote !== '' ? mb_substr($closeNote, 0, 500) : null,
+                'merged_into_alert_id'    => $mergedInto,
                 'acknowledged_by_user_id' => $ackBy,
                 'acknowledged_at'         => $ackAt,
-                'alert_details'           => substr($updatedDetails, 0, 500),
                 'record_version'          => (int) $alert->record_version + 1,
                 'updated_at'              => $now,
             ]);
 
+            // Timeline event
+            try {
+                DB::table('alert_timeline_events')->insert([
+                    'alert_id' => $id,
+                    'event_code' => 'CLOSED',
+                    'event_category' => 'WORKFLOW',
+                    'actor_user_id' => $userId,
+                    'actor_name' => (string) ($user->full_name ?? $user->username ?? ''),
+                    'actor_role' => $userRole,
+                    'summary' => mb_substr($summary, 0, 500),
+                    'payload_json' => json_encode([
+                        'close_category' => $closeCategory ?: null,
+                        'close_note' => $closeNote ?: null,
+                        'merged_into_alert_id' => $mergedInto,
+                        'from_status' => $alert->status,
+                    ]),
+                    'severity' => 'INFO',
+                    'created_at' => $now,
+                ]);
+            } catch (Throwable $e) {
+                Log::warning('[Alerts][close] timeline insert failed: ' . $e->getMessage());
+            }
+
             $updated = DB::table('alerts')->where('id', $id)->first();
 
-            Log::info('[Alerts][close] Alert closed', [
-                'alert_id'     => $id,
-                'by_user'      => $userId,
-                'role'         => $userRole,
-                'close_reason' => $closeReason,
-            ]);
+            // Closure email (best-effort)
+            $closerName = (string) ($user->full_name ?? $user->username ?? ('user#' . $userId));
+            $reasonForEmail = $closeCategory !== ''
+                ? (self::CLOSE_CATEGORIES[$closeCategory] . ($closeNote !== '' ? " — {$closeNote}" : ''))
+                : $closeNote;
+            $dispatch = \App\Services\NotificationDispatcher::dispatchAlertClosed($updated, $userId, $closerName, $reasonForEmail);
 
             return $this->ok($this->formatAlert($updated), 'Alert closed.', [
-                'closed_at'    => $now,
-                'close_reason' => $closeReason,
+                'closed_at'       => $now,
+                'close_category'  => $closeCategory ?: null,
+                'close_note'      => $closeNote ?: null,
+                'merged_into'     => $mergedInto,
+                'notification'    => $dispatch,
             ]);
         } catch (Throwable $e) {
             return $this->serverError($e, 'alerts close');
         }
+    }
+
+    /**
+     * Reopen is now handled by AlertCollaborationController::reopen which was
+     * registered later in routes/api.php and wins the route match.
+     * Kept this comment as a breadcrumb so nobody re-adds a duplicate.
+     */
+
+    /** GET /alerts/close-categories — seeds the War Room close dropdown. */
+    public function closeCategories(): JsonResponse
+    {
+        $out = [];
+        foreach (self::CLOSE_CATEGORIES as $k => $label) {
+            $out[] = [
+                'code' => $k, 'label' => $label,
+                'requires_merged_into' => $k === 'DUPLICATE',
+                'requires_note' => $k === 'OTHER',
+            ];
+        }
+        return response()->json(['ok' => true, 'data' => ['categories' => $out]]);
     }
 
     // ═════════════════════════════════════════════════════════════════════
@@ -763,6 +907,8 @@ final class AlertsController extends Controller
             'case_status'             => $alert->case_status ?? null,
             'syndrome'                => $alert->syndrome ?? null,
             'traveler_gender'         => $alert->traveler_gender ?? null,
+            'top_disease_code'        => $alert->top_disease_code ?? null,
+            'top_disease_confidence'  => isset($alert->top_disease_confidence) ? (float) $alert->top_disease_confidence : null,
         ];
     }
 
